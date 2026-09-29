@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
+	"github.com/grexie/remote-ssh-agent/internal/limits"
 	"github.com/grexie/remote-ssh-agent/internal/signer"
 )
 
@@ -88,8 +89,8 @@ func (s *Server) requestCreate(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if !SessionPattern.MatchString(in.Session) || !textValid(in.Reason, 8, 1000) || !filepath.IsAbs(in.Socket) || !textValid(in.Socket, 1, 104) || in.Duration < 1 || in.Duration > 3600 {
-		fail(w, 400, "Session, a meaningful justification, absolute socket path, and duration of 1s–1h are required")
+	if !SessionPattern.MatchString(in.Session) || !textValid(in.Reason, 8, 1000) || !filepath.IsAbs(in.Socket) || !textValid(in.Socket, 1, 104) || in.Duration < 1 || in.Duration > int(limits.MaxLeaseDuration/time.Second) {
+		fail(w, 400, "Session, a meaningful justification, absolute socket path, and duration of 1s–48h are required")
 		return
 	}
 	s.mu.Lock()

@@ -8,7 +8,7 @@ Keychain syncing and capacity are provider capabilities, not promises made by th
 
 ## Temporary signing
 
-Each approval has a single-use WebAuthn challenge bound to the browser session and request ID. User verification is required. The approval UI displays the requesting client, session, justification, key fingerprint, requested duration, and client-supplied socket path. Those descriptions are statements from the paired client; they do not enforce which remote commands it will run.
+Each approval has a single-use WebAuthn challenge bound to the browser session and request ID. User verification is required. Lease durations range from 1 second to 48 hours, starting when approval succeeds. The approval UI displays the requesting client, session, justification, key fingerprint, requested duration, and client-supplied socket path. Those descriptions are statements from the paired client; they do not enforce which remote commands it will run.
 
 The browser decrypts its largeBlob only after verification, then creates an ephemeral P-256 ECDH envelope for that request's separate signer process. HKDF and AES-GCM bind the envelope to the request ID and fingerprint. The parent server forwards only encrypted key material. The child verifies the decrypted key fingerprint, permits only identity listing/signing, disallows legacy RSA SHA-1 signatures, and has its own hard expiry timer.
 

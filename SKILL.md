@@ -11,7 +11,7 @@ Use the `remote-ssh-agent` CLI to obtain a request-scoped SSH agent socket. The 
 
 Run `remote-ssh-agent version` to check installation. A human must first deploy the server, create their passkey, paste their SSH key and passphrase into the PWA, and pair this CLI. If the CLI reports that it is unconfigured, ask the user to complete pairing. Do not read their private key, request their key passphrase, or try another credential to bypass this flow.
 
-Choose a unique session name for the current task, a concrete justification describing the intended SSH work, and the shortest practical duration (1 second to 1 hour). Names contain only letters, digits, dots, underscores and hyphens, up to 64 characters. Reusing an active grant never extends its expiry.
+Choose a unique session name for the current task, a concrete justification describing the intended SSH work, and the shortest practical duration (1 second to 48 hours; `--duration 48h` is the maximum). Names contain only letters, digits, dots, underscores and hyphens, up to 64 characters. Reusing an active grant never extends its expiry.
 
 ## Prefer automatic cleanup
 

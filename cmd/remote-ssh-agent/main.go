@@ -22,6 +22,7 @@ import (
 
 	"github.com/grexie/remote-ssh-agent/internal/app"
 	"github.com/grexie/remote-ssh-agent/internal/bridge"
+	"github.com/grexie/remote-ssh-agent/internal/limits"
 	"github.com/grexie/remote-ssh-agent/internal/signer"
 )
 
@@ -84,7 +85,7 @@ func run(ctx context.Context, args []string) error {
 		config := f.String("config", bridge.DefaultConfigPath(), "CLI config file")
 		session := f.String("session", "", "session name (required)")
 		reason := f.String("reason", "", "justification shown on the phone (required)")
-		duration := f.Duration("duration", 0, "grant duration, up to 1h (required)")
+		duration := f.Duration("duration", 0, "grant duration, up to 48h (required)")
 		host := f.String("host", "", "SSH config alias")
 		hostname := f.String("hostname", "", "actual SSH hostname (optional)")
 		if e := f.Parse(args[1:]); e != nil {
@@ -121,8 +122,8 @@ func run(ctx context.Context, args []string) error {
 			}
 			return e
 		}
-		if len(strings.TrimSpace(*reason)) < 8 || len(*reason) > 1000 || *duration < time.Second || *duration > time.Hour {
-			return errors.New("--reason (8–1000 characters) and --duration (1s–1h) are required")
+		if len(strings.TrimSpace(*reason)) < 8 || len(*reason) > 1000 || *duration < time.Second || *duration > limits.MaxLeaseDuration {
+			return errors.New("--reason (8–1000 characters) and --duration (1s–48h) are required")
 		}
 		if args[0] == "ssh-config" {
 			return sshConfig(c, *config, *host, *hostname, *session, *reason, *duration)

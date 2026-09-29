@@ -122,12 +122,18 @@ function renderLogin() {
       await refresh();
     });
 }
-function minutes(n) {
-  return n < 60 ? n + " sec" : Math.round(n / 60) + " min";
+function durationLabel(n) {
+  if (n < 60) return n + " sec";
+  if (n < 3600) return Math.round(n / 60) + " min";
+  const hours = Math.floor(n / 3600),
+    remaining = Math.floor((n % 3600) / 60);
+  return hours + (hours === 1 ? " hour" : " hours") + (remaining ? " " + remaining + " min" : "");
 }
 function countdown(q) {
   const end = new Date(q.status === "pending" ? q.pendingUntil : q.expiresAt);
   const sec = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+  if (sec >= 3600)
+    return Math.floor(sec / 3600) + ":" + String(Math.floor((sec % 3600) / 60)).padStart(2, "0") + ":" + String(sec % 60).padStart(2, "0");
   return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
 }
 function time(t) {
@@ -214,7 +220,7 @@ function renderRequests() {
 }
 function requestCard(q) {
   const pending = q.status === "pending";
-  return `<article class="request-card" id="request-${esc(q.id)}"><div class="request-top"><div><h3>${esc(q.session)}</h3><p>${esc(q.clientName)}</p></div><span class="badge ${pending ? "pending" : "active"}">${pending ? "Pending" : "Active"}</span></div><p class="reason">${esc(q.reason)}</p><div class="request-details"><span>${esc(q.keyName)}</span><span>${minutes(q.durationSeconds)}</span><span class="remaining">${pending ? "Request expires" : "Access ends"} in <b data-countdown="${esc(q.id)}">${countdown(q)}</b></span></div><details><summary>Details</summary><dl><dt>Fingerprint</dt><dd>${esc(q.fingerprint)}</dd><dt>Requested socket</dt><dd>${esc(q.socket)}</dd><dt>Request ID</dt><dd>${esc(q.id)}</dd></dl><p class="small">The client supplied this session name, purpose, and socket path.</p></details><div class="request-actions">${pending ? `<button class="secondary" data-revoke="${esc(q.id)}">Deny</button><button class="primary" data-approve="${esc(q.id)}">Approve for ${minutes(q.durationSeconds)}</button>` : `<button class="danger" data-revoke="${esc(q.id)}">Revoke access</button>`}</div></article>`;
+  return `<article class="request-card" id="request-${esc(q.id)}"><div class="request-top"><div><h3>${esc(q.session)}</h3><p>${esc(q.clientName)}</p></div><span class="badge ${pending ? "pending" : "active"}">${pending ? "Pending" : "Active"}</span></div><p class="reason">${esc(q.reason)}</p><div class="request-details"><span>${esc(q.keyName)}</span><span>${durationLabel(q.durationSeconds)}</span><span class="remaining">${pending ? "Request expires" : "Access ends"} in <b data-countdown="${esc(q.id)}">${countdown(q)}</b></span></div><details><summary>Details</summary><dl><dt>Fingerprint</dt><dd>${esc(q.fingerprint)}</dd><dt>Requested socket</dt><dd>${esc(q.socket)}</dd><dt>Request ID</dt><dd>${esc(q.id)}</dd></dl><p class="small">The client supplied this session name, purpose, and socket path.</p></details><div class="request-actions">${pending ? `<button class="secondary" data-revoke="${esc(q.id)}">Deny</button><button class="primary" data-approve="${esc(q.id)}">Approve for ${durationLabel(q.durationSeconds)}</button>` : `<button class="danger" data-revoke="${esc(q.id)}">Revoke access</button>`}</div></article>`;
 }
 async function approve(id) {
   const start = await api("/api/requests/" + id + "/approve/begin", {});

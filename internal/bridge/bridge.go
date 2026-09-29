@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/grexie/remote-ssh-agent/internal/app"
+	"github.com/grexie/remote-ssh-agent/internal/limits"
 	"github.com/grexie/remote-ssh-agent/internal/signer"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -111,8 +112,8 @@ func Status(ctx context.Context, c Config, session string) (app.Request, error) 
 }
 
 func Request(ctx context.Context, c Config, session, reason string, duration time.Duration, ensure, noWait bool, progress func(string)) (string, error) {
-	if duration < time.Second || duration > time.Hour {
-		return "", errors.New("duration must be between 1s and 1h")
+	if duration < time.Second || duration > limits.MaxLeaseDuration {
+		return "", errors.New("duration must be between 1s and 48h")
 	}
 	state, alias, lock, e := paths(c, session)
 	if e != nil {

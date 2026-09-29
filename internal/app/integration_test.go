@@ -247,6 +247,27 @@ func TestApprovalIsolationRevocationAndExpiry(t *testing.T) {
 	h.call("POST", "/api/requests/"+d.Request.ID+"/revoke", "", map[string]any{}, nil, 200)
 	h.call("POST", "/api/requests/"+d.Request.ID+"/approve/begin", "", map[string]any{}, nil, 409)
 }
+func TestLongLeaseApprovalAndRevocation(t *testing.T) {
+	for _, duration := range []int{3601, 48 * 60 * 60} {
+		t.Run(strconv.Itoa(duration), func(t *testing.T) {
+			h := newHarness(t)
+			l := h.request("long-lease", duration)
+			before := time.Now()
+			h.approve(l)
+			after := time.Now()
+			var q Request
+			h.call("GET", "/v1/requests/"+l.Request.ID, l.Capability, nil, &q, 200)
+			leaseDuration := time.Duration(duration) * time.Second
+			if q.Status != "active" || q.DurationSeconds != duration || q.ExpiresAt.Before(before.Add(leaseDuration)) || q.ExpiresAt.After(after.Add(leaseDuration)) {
+				t.Fatalf("lease did not start its requested duration at approval: %+v", q)
+			}
+			h.sign(l, 200)
+			h.call("POST", "/v1/revoke", h.token, map[string]string{"session": "long-lease"}, nil, 200)
+			h.sign(l, 403)
+		})
+	}
+}
+
 func TestFreshVerificationAndBoundCeremonies(t *testing.T) {
 	h := newHarness(t)
 	a := h.request("one", 30)
@@ -279,7 +300,7 @@ func TestFreshVerificationAndBoundCeremonies(t *testing.T) {
 }
 func TestRejectInvalidRequestsAndForeignOrigins(t *testing.T) {
 	h := newHarness(t)
-	for _, d := range []int{0, -1, 3601} {
+	for _, d := range []int{0, -1, 48*60*60 + 1} {
 		h.call("POST", "/v1/requests", h.token, map[string]any{"session": "bad", "reason": "valid justification", "socket": "/tmp/a.sock", "durationSeconds": d}, nil, 400)
 	}
 	h.call("POST", "/v1/requests", h.token, map[string]any{"session": "bad", "reason": " ", "socket": "/tmp/a.sock", "durationSeconds": 60}, nil, 400)

@@ -82,7 +82,7 @@ SSH_AUTH_SOCK="$sock" ssh api-host
 remote-ssh-agent revoke --session codex-deploy-api
 ```
 
-The request waits for approval and prints only the socket path to stdout; status messages go to stderr. The allowed duration is 1 second to 1 hour and starts when approval succeeds. Unapproved requests expire after 5 minutes. Each request uses a unique socket, a private directory, and a separate signing process. An existing session name cannot be used for a simultaneous second request by the same client.
+The request waits for approval and prints only the socket path to stdout; status messages go to stderr. The allowed duration is 1 second to 48 hours (`--duration 48h` for the maximum) and starts when approval succeeds. Unapproved requests expire after 5 minutes. Each request uses a unique socket, a private directory, and a separate signing process. An existing session name cannot be used for a simultaneous second request by the same client.
 
 For automatic cleanup around one command:
 

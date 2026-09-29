@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/grexie/remote-ssh-agent/internal/keyparse"
+	"github.com/grexie/remote-ssh-agent/internal/limits"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -164,7 +165,7 @@ func decrypt(priv *ecdh.PrivateKey, e Envelope, aad []byte) ([]byte, error) {
 // Serve runs only in the hidden child-process command. EOF, hard deadline,
 // expiry, or the parent killing the process destroys the live signer.
 func Serve(id, fingerprint string, hardDeadline time.Time, in io.Reader, out io.Writer) error {
-	if time.Until(hardDeadline) <= 0 || time.Until(hardDeadline) > 65*time.Minute {
+	if time.Until(hardDeadline) <= 0 || time.Until(hardDeadline) > limits.MaxLeaseDuration+5*time.Minute {
 		return errors.New("invalid signer deadline")
 	}
 	timer := time.AfterFunc(time.Until(hardDeadline), func() { os.Exit(0) })

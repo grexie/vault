@@ -187,6 +187,13 @@ try {
     { input: pairing },
   );
   assert.equal(configured.code, 0, configured.err);
+  const oversized = await cli([
+    "request", "--no-wait", "--session", "oversized-smoke",
+    "--reason", "Verify the maximum lease is enforced",
+    "--duration", "48h1s",
+  ]);
+  assert.notEqual(oversized.code, 0);
+  assert.match(oversized.err, /1s–48h/);
   const requested = await cli([
     "request",
     "--no-wait",
@@ -195,15 +202,16 @@ try {
     "--reason",
     "Verify approval with a generated RSA key",
     "--duration",
-    "30s",
+    "48h",
   ]);
   assert.equal(requested.code, 0, requested.err);
   const pending = JSON.parse(requested.out);
   assert.equal(pending.status, "pending");
+  assert.equal(pending.durationSeconds, 48 * 60 * 60);
   const status = await cli(["status", "--session", "browser-smoke"]);
   assert.equal(JSON.parse(status.out).status, "pending");
   await page.getByRole("button", { name: /^Requests/ }).click();
-  await page.getByRole("button", { name: "Approve for 30 sec" }).waitFor();
+  await page.getByRole("button", { name: "Approve for 48 hours" }).waitFor();
   await mkdir("test-results", { recursive: true });
   await page.screenshot({
     path: "test-results/desktop-requests.png",
@@ -226,9 +234,15 @@ try {
     "--timeout",
     "45s",
   ]);
-  await page.getByRole("button", { name: "Approve for 30 sec" }).click();
+  await page.getByRole("button", { name: "Approve for 48 hours" }).click();
   const approved = await waiting;
   assert.equal(approved.code, 0, approved.err);
+  const activeStatus = JSON.parse((await cli(["status", "--session", "browser-smoke"])).out);
+  const remaining = (new Date(activeStatus.expiresAt) - Date.now()) / 1000;
+  assert.ok(remaining > 48 * 60 * 60 - 120 && remaining <= 48 * 60 * 60);
+  await until(async () => /^(47|48):\d{2}:\d{2}$/.test(
+    await page.locator(`[data-countdown="${pending.id}"]`).textContent(),
+  ));
   const socket = approved.out.trim();
   assert.ok(socket.endsWith("/agent.sock"));
   const pub = execFileSync("/usr/bin/ssh-add", ["-L"], {
