@@ -234,9 +234,7 @@ func waitAndStart(ctx context.Context, l Lease, state, alias string, progress fu
 			_ = os.Remove(filepath.Dir(l.Request.Socket))
 		}
 	}()
-	if progress != nil {
-		progress("Waiting for phone approval for " + l.Request.Session + "…")
-	}
+	reported := false
 	for {
 		var q app.Request
 		if e := client.Call(ctx, "GET", "/v1/requests/"+l.Request.ID, l.Capability, nil, &q); e != nil {
@@ -248,6 +246,10 @@ func waitAndStart(ctx context.Context, l Lease, state, alias string, progress fu
 		}
 		if q.Status != "pending" {
 			return "", fmt.Errorf("request %s: %s", q.Status, q.EndReason)
+		}
+		if progress != nil && !reported {
+			progress("Waiting for phone approval for " + l.Request.Session + "…")
+			reported = true
 		}
 		select {
 		case <-ctx.Done():
