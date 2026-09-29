@@ -112,9 +112,22 @@ remote-ssh-agent ssh-config \
   > ~/.ssh/remote-agent.conf
 ```
 
-Add `Include ~/.ssh/remote-agent.conf` near the beginning of `~/.ssh/config`. Add the appropriate `User` setting for that host using normal SSH configuration. The generated `Match originalhost ... exec` runs `ensure`; `IdentityAgent` points to a stable session alias for the unique current socket. The actual connection waits for approval. `ensure` reuses a matching unexpired session without extending it and rejects mismatched reasons or durations. `revoke --session codex-api` ends the session.
+Add `Include ~/.ssh/remote-agent.conf` at the beginning of `~/.ssh/config`. Omit `--hostname` when integrating an existing alias, so its normal `HostName`, `User`, `Port`, `HostKeyAlias`, and `ProxyJump` settings remain in effect. Generate one snippet per alias and append them to the included file.
 
-`ssh -G` also evaluates `Match exec` and can trigger approval. Put the snippet before broader rules: OpenSSH's first-value and additive `IdentityFile` semantics can affect existing configurations. The generated stanza disables password fallback and agent forwarding. Other explicitly configured identities and established ControlMaster connections are outside this agent's control. Use a fresh connection to test approval.
+Now use the native commands normally:
+
+```sh
+ssh approved-api
+ssh approved-api 'journalctl -u api -n 100 --no-pager'
+scp ./report.txt approved-api:/tmp/report.txt
+scp -r approved-api:/var/log/api ./logs
+```
+
+OpenSSH runs `ensure` while reading the configuration and waits for phone approval before connecting. `IdentityAgent` selects the dedicated socket through a stable session alias. The native programs retain their arguments, stdin, terminal handling, exit codes, SFTP/legacy SCP modes, and jump-host routing. A jump host needs its own snippet and approval, unless both connections inherit an already-approved task socket. Approval failure blocks the connection, including when a different lease is still active under that alias. The snippets disable password fallback, forwarding, and connection multiplexing.
+
+A matching unexpired host lease is reused without extending it. The configured reason is static and the lease lasts until its deadline or explicit `remote-ssh-agent revoke --session codex-api`; closing SSH alone does not revoke a shared host lease. For a concrete task and automatic cleanup, use `remote-ssh-agent exec --session NAME --reason TEXT --duration 10m -- ssh approved-api COMMAND`. Native `ssh`/`scp` then inherit the verified task socket without an additional approval. A manually supplied `SSH_AUTH_SOCK` from `request` works the same way. Ordinary agents are ignored; revoked, expired, age-only, or unverifiable managed sockets fail instead of silently requesting a replacement.
+
+`ssh -G` also evaluates `Match exec` and can trigger approval. Put the include before other rules. OpenSSH command-line settings override configuration, and explicit `IdentityFile` entries are additive: remove private-key fallback entries when requiring approval for all access. This configuration is a client policy, not a restriction on the SSH key's authorized servers or on commands an approved client may run.
 
 ## Give this to Codex or Claude Code
 

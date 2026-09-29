@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,6 +36,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:]); err != nil {
+		if errors.Is(err, errNoInheritedSocket) {
+			os.Exit(1) // A quiet false result for ssh_config Match exec.
+		}
 		fmt.Fprintln(os.Stderr, "remote-ssh-agent:", err)
 		os.Exit(1)
 	}
@@ -64,6 +68,21 @@ func run(ctx context.Context, args []string) error {
 		return grantCommand(ctx, args[1:])
 	case "connect":
 		return connectCommand(ctx, args[1:])
+	case "_ssh-inherited":
+		f := flags(args[0])
+		config := f.String("config", bridge.DefaultConfigPath(), "CLI config file")
+		if e := f.Parse(args[1:]); e != nil {
+			return e
+		}
+		c, e := bridge.Load(*config)
+		if e != nil {
+			return errNoInheritedSocket
+		}
+		found, e := bridge.InheritedSocket(ctx, c, os.Getenv("SSH_AUTH_SOCK"))
+		if !found || e != nil {
+			return errNoInheritedSocket
+		}
+		return nil
 	case "configure":
 		f := flags("configure")
 		server := f.String("server", "", "HTTPS URL of the phone app")
@@ -88,6 +107,7 @@ func run(ctx context.Context, args []string) error {
 	case "request", "ensure", "revoke", "exec", "ssh-config", "status", "wait":
 		f := flags(args[0])
 		noWait := f.Bool("no-wait", false, "submit and return JSON without waiting for approval")
+		inherit := f.Bool("inherit-socket", false, "ensure: reuse a verified Remote SSH Agent SSH_AUTH_SOCK")
 		waitTimeout := f.Duration("timeout", 5*time.Minute, "maximum approval wait; timeout revokes the request")
 		config := f.String("config", bridge.DefaultConfigPath(), "CLI config file")
 		session := f.String("session", "", "session name (required)")
@@ -98,6 +118,9 @@ func run(ctx context.Context, args []string) error {
 		hostname := f.String("hostname", "", "actual SSH hostname (optional)")
 		if e := f.Parse(args[1:]); e != nil {
 			return e
+		}
+		if *inherit && args[0] != "ensure" {
+			return errors.New("--inherit-socket is only valid with ensure")
 		}
 		c, e := bridge.Load(*config)
 		if e != nil {
@@ -147,6 +170,18 @@ func run(ctx context.Context, args []string) error {
 		}
 		waitCtx, cancel := context.WithTimeout(ctx, *waitTimeout)
 		defer cancel()
+		if *inherit {
+			if *accessFlag != access.SSH {
+				return errors.New("--inherit-socket requires --access ssh")
+			}
+			inherited := os.Getenv("SSH_AUTH_SOCK")
+			if found, e := bridge.InheritedSocket(waitCtx, c, inherited); found || e != nil {
+				if e == nil {
+					fmt.Println(inherited)
+				}
+				return e
+			}
+		}
 		sock, e := bridge.Request(waitCtx, c, *session, *reason, *duration, *accessFlag, args[0] == "ensure", *noWait, func(m string) { fmt.Fprintln(os.Stderr, m) })
 		if e != nil {
 			return e
@@ -243,6 +278,20 @@ func serve(ctx context.Context, args []string) error {
 	return e
 }
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+
+var errNoInheritedSocket = errors.New("no approved inherited socket")
+
+func matchCommand(parts ...string) string {
+	for i, p := range parts {
+		parts[i] = shellQuote(p)
+	}
+	command := strings.Join(parts, " ") + " >/dev/null"
+	// OpenSSH expands percent tokens even inside shell quotes.
+	command = strings.ReplaceAll(command, "%", "%%")
+	command = strings.ReplaceAll(command, "\\", "\\\\")
+	return strings.ReplaceAll(command, "\"", "\\\"")
+}
+
 func sshConfig(c bridge.Config, config, host, hostname, session, reason string, d time.Duration) error {
 	if !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`).MatchString(host) {
 		return errors.New("--host must be a single SSH alias without wildcards")
@@ -261,21 +310,25 @@ func sshConfig(c bridge.Config, config, host, hostname, session, reason string, 
 	if e != nil {
 		return e
 	}
-	parts := []string{exe, "ensure", "--config", config, "--session", session, "--reason", reason, "--duration", d.String()}
-	for i, p := range parts {
-		parts[i] = shellQuote(p)
+	config, e = filepath.Abs(config)
+	if e != nil {
+		return e
 	}
-	command := strings.Join(parts, " ") + " >/dev/null"
-	// OpenSSH expands percent tokens even inside shell quotes. Escape them before
-	// escaping the outer ssh_config double-quoted exec argument.
-	command = strings.ReplaceAll(command, "%", "%%")
-	command = strings.ReplaceAll(command, "\\", "\\\\")
-	command = strings.ReplaceAll(command, "\"", "\\\"")
-	fmt.Printf("# Include this before broader Host rules. Session: %s\nHost %s\n", session, host)
+	if strings.ContainsAny(config+exe, "\r\n\x00") {
+		return errors.New("SSH config paths must not contain newlines")
+	}
+	command := matchCommand(exe, "ensure", "--inherit-socket", "--config", config, "--session", session, "--reason", reason, "--duration", d.String())
+	inherited := matchCommand(exe, "_ssh-inherited", "--config", config)
+	fmt.Printf("# Include this before broader Host rules. Session: %s\n", session)
+	fmt.Printf("Match originalhost %s exec \"%s\"\n    IdentityAgent SSH_AUTH_SOCK\n", host, inherited)
+	// A failed Match alone does not stop SSH. Block transport on a rejected,
+	// mismatched, or unavailable approval instead of using an old socket.
+	fmt.Printf("Match originalhost %s !exec \"%s\"\n    ProxyCommand false\n    IdentityAgent none\n", host, command)
+	fmt.Printf("Host %s\n", host)
 	if hostname != "" {
 		fmt.Printf("    HostName %s\n", hostname)
 	}
-	fmt.Printf("    IdentityAgent %s\n    IdentityFile none\n    IdentitiesOnly no\n    PreferredAuthentications publickey\n    PasswordAuthentication no\n    KbdInteractiveAuthentication no\n    ForwardAgent no\n    AddKeysToAgent no\nMatch originalhost %s exec \"%s\"\nMatch all\n", strconv.Quote(alias), host, command)
+	fmt.Printf("    IdentityAgent %s\n    IdentityFile none\n    IdentitiesOnly no\n    PreferredAuthentications publickey\n    PasswordAuthentication no\n    KbdInteractiveAuthentication no\n    ForwardAgent no\n    AddKeysToAgent no\n    ControlMaster no\n    ControlPath none\n    ControlPersist no\nMatch all\n", strconv.Quote(alias))
 	return nil
 }
 func usage() {

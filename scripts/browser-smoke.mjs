@@ -65,7 +65,7 @@ async function cli(args, options = {}) {
     p.stdin.end();
   });
 }
-let browser;
+let browser, sshFixture;
 const errors = [];
 try {
   await until(() => logs.includes("one-time setup token:"));
@@ -300,42 +300,118 @@ try {
   const rejection = await rejectedWait;
   assert.notEqual(rejection.code, 0);
   assert.match(rejection.err, /denied/);
-  // Auto-request integration uses a real OpenSSH config parser (ssh -G evaluates Match exec).
+  // Native SSH/SCP use the real config parser, transport, and agent signatures.
+  execFileSync("go", ["build", "-o", "bin/sshd-fixture", "./scripts/sshd-fixture"]);
+  const remoteDir = join(dir, "remote");
+  await mkdir(remoteDir);
+  sshFixture = spawn(resolve("bin/sshd-fixture"), [join(dir, "test.pub"), remoteDir]);
+  let fixtureOut = "", fixtureErr = "";
+  sshFixture.stdout.on("data", b => fixtureOut += b);
+  sshFixture.stderr.on("data", b => fixtureErr += b);
+  const fixture = await until(() => { if (sshFixture.exitCode !== null) throw new Error(fixtureErr); return fixtureOut.includes("\n") && JSON.parse(fixtureOut.trim()); });
+  const knownHosts = join(dir, "known_hosts");
+  await writeFile(knownHosts, `[127.0.0.1]:${fixture.port} ${fixture.hostKey}`);
+  const nativeReason = "Verify SSH, SCP and jump routing: 100% 'native' approval";
   const snippet = await cli([
-    "ssh-config",
-    "--host",
-    "fixture-host",
-    "--hostname",
-    "example.invalid",
-    "--session",
-    "config-smoke",
-    "--reason",
-    "Verify the configured SSH host approval",
-    "--duration",
-    "30s",
+    "ssh-config", "--host", "fixture-host", "--hostname", "127.0.0.1",
+    "--session", "config-smoke", "--reason", nativeReason, "--duration", "2m",
   ]);
   assert.equal(snippet.code, 0, snippet.err);
   const configPath = join(dir, "ssh.conf");
-  await writeFile(configPath, snippet.out);
-  const ssh = spawn("/usr/bin/ssh", ["-F", configPath, "-G", "fixture-host"], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let sshOut = "",
-    sshErr = "";
-  ssh.stdout.on("data", (b) => (sshOut += b));
-  ssh.stderr.on("data", (b) => (sshErr += b));
-  const sshExit = new Promise((r) => ssh.on("exit", r));
+  const nativeConfig = snippet.out + snippet.out.replaceAll("fixture-host", "fixture-jump") + snippet.out.replaceAll("fixture-host", "fixture-via") + `
+Host fixture-via
+    ProxyJump fixture-jump
+Host *
+    Port ${fixture.port}
+    User fixture
+    BatchMode yes
+    ConnectTimeout 5
+    StrictHostKeyChecking yes
+    UserKnownHostsFile "${knownHosts}"
+`;
+  await writeFile(configPath, nativeConfig);
+  function native(command, args, input = "", socket = "") {
+    return new Promise((resolve, reject) => {
+      const p = spawn(`/usr/bin/${command}`, ["-F", configPath, ...args], {
+        env: {...process.env, SSH_AUTH_SOCK: socket}, stdio:["pipe","pipe","pipe"],
+      });
+      let out = "", err = "";
+      const timer = setTimeout(() => { p.kill(); reject(new Error(`native ${command} ${args.join(" ")} timed out: ${err}`)); }, 35000);
+      p.stdout.on("data", b => out += b);
+      p.stderr.on("data", b => err += b);
+      p.on("error", reject);
+      p.stdin.on("error", e => { if (e.code !== "EPIPE") reject(e); });
+      p.on("close", code => { clearTimeout(timer); resolve({code,out,err}); });
+      p.stdin.end(input);
+    });
+  }
+  const stdinFixture = "Native SSH keeps stdin, including spaces and newlines.\n";
+  const nativeSSH = native("ssh", ["-T", "fixture-host", "cat; printf 'native-stderr' >&2; exit 37"], stdinFixture);
   await until(async () => {
-    if (!(await page.locator(".busy").count()))
-      await page.getByRole("button", { name: /^Requests/ }).click();
-    return await page
-      .getByRole("button", { name: "Approve for 30 sec" })
-      .isVisible();
+    if (!(await page.locator(".busy").count())) await page.getByRole("button", { name: /^Requests/ }).click();
+    return await page.getByRole("button", { name: "Approve for 2 min" }).isVisible();
   }, 20000);
-  await page.getByRole("button", { name: "Approve for 30 sec" }).click();
-  assert.equal(await sshExit, 0, sshErr);
-  assert.match(sshOut, /identityagent .*\.sock/);
+  await page.getByRole("button", { name: "Approve for 2 min" }).click();
+  const nativeResult = await nativeSSH;
+  assert.equal(nativeResult.code, 37, nativeResult.err);
+  assert.equal(nativeResult.out, stdinFixture);
+  assert.match(nativeResult.err, /native-stderr/);
+  const parsedSSH = await native("ssh", ["-G", "fixture-host"]);
+  assert.equal(parsedSSH.code, 0, parsedSSH.err);
+  assert.match(parsedSSH.out, /identityagent .*\.sock/);
+  assert.doesNotMatch(parsedSSH.out, /^controlpath (?!none$).+/m);
+  assert.match(parsedSSH.out, /controlmaster (false|no)/);
+  const viaJump = await native("ssh", ["fixture-via", "printf jump-ok"]);
+  assert.equal(viaJump.code, 0, viaJump.err);
+  assert.equal(viaJump.out, "jump-ok");
+  const upload = join(dir, "upload with spaces.txt"), download = join(dir, "download.txt");
+  await writeFile(upload, stdinFixture);
+  for (const legacy of [false, true]) {
+    const options = legacy ? ["-O"] : [];
+    const remoteName = legacy ? "legacy.txt" : "uploaded with spaces.txt";
+    const sent = await native("scp", [...options, "-p", upload, `fixture-host:${remoteName}`]);
+    assert.equal(sent.code, 0, sent.err);
+    const received = await native("scp", [...options, `fixture-host:${remoteName}`, download]);
+    assert.equal(received.code, 0, received.err);
+    assert.equal(await readFile(download, "utf8"), stdinFixture);
+  }
+  const tree = join(dir,"tree");
+  await mkdir(tree);
+  await writeFile(join(tree,"nested.txt"), stdinFixture);
+  const recursive = await native("scp", ["-r", tree, "fixture-via:copied-tree"]);
+  assert.equal(recursive.code, 0, recursive.err);
+  assert.equal(await readFile(join(remoteDir,"copied-tree","nested.txt"),"utf8"), stdinFixture);
+  const originalLease = JSON.parse((await cli(["status", "--session", "config-smoke"])).out);
+  // A task's explicit approved socket wins over the host's static reason without a new prompt.
+  await writeFile(configPath, nativeConfig.replaceAll("config-smoke", "unused-host-session"));
+  const inheritedSSH = await native("ssh", ["fixture-host", "printf inherited-ok"], "", originalLease.socket);
+  assert.equal(inheritedSSH.code, 0, inheritedSSH.err);
+  assert.equal(inheritedSSH.out, "inherited-ok");
+  assert.notEqual((await cli(["status", "--session", "unused-host-session"])).code, 0);
+  // A mismatched reason must not authenticate through the still-active alias.
+  await writeFile(configPath, nativeConfig.replaceAll("2m0s", "3m0s"));
+  const mismatch = await native("ssh", ["fixture-host", "printf must-not-run"]);
+  assert.notEqual(mismatch.code, 0);
+  assert.equal(mismatch.out, "");
+  assert.match(mismatch.err, /different access, justification, or duration/);
   assert.equal((await cli(["revoke", "--session", "config-smoke"])).code, 0);
+  await writeFile(configPath, nativeConfig);
+  const revokedInherited = await native("ssh", ["fixture-host", "printf must-not-run"], "", originalLease.socket);
+  assert.notEqual(revokedInherited.code, 0);
+  assert.equal(revokedInherited.out, "");
+  // Denial blocks both transport and any local-key fallback.
+  const deniedSSH = native("ssh", ["fixture-host", "printf must-not-run"]);
+  await until(async () => {
+    await page.getByRole("button", { name: /^Requests/ }).click();
+    return await page.getByRole("button", { name: "Deny", exact: true }).isVisible();
+  });
+  await page.getByRole("button", { name: "Deny", exact: true }).click();
+  const deniedNative = await deniedSSH;
+  assert.notEqual(deniedNative.code, 0);
+  assert.equal(deniedNative.out, "");
+  assert.match(deniedNative.err, /denied/);
+  assert.equal((await cli(["revoke", "--session", "config-smoke"])).code, 0);
+  console.log("PASS: native SSH, SCP SFTP/legacy/recursive transfers, jump hosts, inherited approval, mismatch and rejection.");
   // Timeout cancels a still-pending request instead of leaving a surprise grant.
   assert.equal(
     (
@@ -494,7 +570,7 @@ try {
   await page.getByRole("heading", { name: "Requests", exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: unattended age encryption, scoped and one-shot decryption, persistent CI connection token, idle auto-lock, reapproval with unchanged token, grant revocation, real WebAuthn PRF/largeBlob virtual authenticator, encrypted RSA paste, local Wasm validation, PWA approval, CLI submit/status/wait, ssh-add signatures, live phone revocation, rejection, expiry, wait timeout, automatic exec cleanup, ssh-config auto-request, responsive layouts.",
+    "PASS: unattended age encryption, scoped and one-shot decryption, persistent CI connection token, idle auto-lock, reapproval with unchanged token, grant revocation, real WebAuthn PRF/largeBlob virtual authenticator, encrypted RSA paste, local Wasm validation, PWA approval, CLI submit/status/wait, ssh-add signatures, live phone revocation, rejection, expiry, wait timeout, automatic exec cleanup, native SSH stdin and exit status, SCP SFTP/legacy/recursive transfers, ProxyJump, inherited task leases, fail-closed SSH config, responsive layouts.",
   );
 } catch (e) {
   if (browser) {
@@ -515,6 +591,7 @@ try {
   throw e;
 } finally {
   if (browser) await browser.close();
+  if (sshFixture && sshFixture.exitCode === null && sshFixture.signalCode === null) { sshFixture.kill(); await new Promise(r => sshFixture.once("exit",r)); }
   server.kill("SIGTERM");
   await new Promise((r) => server.once("exit", r));
   await rm(dir, { recursive: true, force: true });

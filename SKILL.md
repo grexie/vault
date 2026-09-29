@@ -37,7 +37,7 @@ trap 'remote-ssh-agent revoke --session "$session"' EXIT HUP INT TERM
 SSH_AUTH_SOCK="$sock" ssh api-host 'systemctl status api --no-pager'
 ```
 
-Do not use `eval`. Each `request` has a distinct actual socket. Progress goes to stderr; successful `request`, `ensure`, and `wait` print only the socket path to stdout. A configured host's explicit `IdentityAgent` overrides `SSH_AUTH_SOCK`; inspect host configuration if the expected identity is not used.
+Do not use `eval`. Each `request` has a distinct actual socket. Progress goes to stderr; successful `request`, `ensure`, and `wait` print only the socket path to stdout. Current generated SSH snippets verify and inherit an approved `SSH_AUTH_SOCK`, including through jump hosts. Older or unrelated explicit `IdentityAgent` rules can override it; bind `-o IdentityAgent="$sock"` when needed.
 
 ## Submit, poll, or wait
 
@@ -61,7 +61,9 @@ remote-ssh-agent ssh-config --host approved-api --hostname api.example.com \
   --session codex-api --reason 'Maintain the API service' --duration 15m
 ```
 
-The snippet uses `Match originalhost ... exec` to run `ensure` and supplies `IdentityAgent`. Include it before broader SSH rules. Changing the user's SSH configuration is a separate action; do it only when requested. A matching unexpired grant is reused; a fresh grant still needs phone approval. The configured reason is static: use task-specific `request`/`exec` when the intended work differs.
+Include the snippet before other SSH rules. Omit `--hostname` for an existing alias to preserve its routing. Changing SSH configuration is a separate action; do it only when requested. Once installed, ordinary `ssh HOST` and `scp SOURCE DESTINATION` automatically wait for approval. Jump hosts need their own snippet; native SSH retains its normal options and behavior. `ssh -G` also runs approval checks.
+
+A matching unexpired host grant is reused without extending it, and lasts until expiry or explicit revocation. The configured reason is static: prefer a task-specific `exec` for automatic cleanup or `request` for several commands. Generated snippets verify the inherited task socket with the server and use it without requesting another grant, including in jump-host subprocesses. Other agents are ignored. A revoked, expired, age-only, or unverifiable managed socket fails closed; do not unset it to bypass that result. A failed automatic check blocks the connection even if an older socket still exists. Do not override that failure with alternate keys or a multiplexed connection.
 
 ## End access
 

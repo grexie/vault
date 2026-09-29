@@ -278,7 +278,11 @@ func waitAndStart(ctx context.Context, l Lease, state, alias string, progress fu
 	if e != nil {
 		return "", e
 	}
-	cmd.Stderr = os.Stderr
+	// The bridge outlives this invocation. Do not retain the caller's stderr
+	// pipe: native SSH/SCP (or a captured exec command) must finish when its
+	// command exits, rather than waiting for the whole lease to expire.
+	// Startup failures are reported by the readiness handshake below.
+	cmd.Stderr = nil
 	if e = cmd.Start(); e != nil {
 		return "", e
 	}
