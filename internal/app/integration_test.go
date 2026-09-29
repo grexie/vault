@@ -345,8 +345,15 @@ func TestPushSubscriptionValidation(t *testing.T) {
 	}
 	h := newHarness(t)
 	for i := 0; i < 2; i++ {
-		h.call("POST", "/api/push", "", pushSub(fmt.Sprintf("https://web.push.apple.com/device-%d", i)), nil, 200)
+		sub := pushSub(fmt.Sprintf("https://web.push.apple.com/device-%d", i))
+		// PushSubscription.toJSON() includes expirationTime, usually null.
+		for _, expiration := range []any{nil, uint64(1800000000000)} {
+			h.call("POST", "/api/push", "", map[string]any{"endpoint": sub.Endpoint, "keys": sub.Keys, "expirationTime": expiration}, nil, 200)
+		}
 	}
+	sub := pushSub("https://web.push.apple.com/invalid")
+	h.call("POST", "/api/push", "", map[string]any{"endpoint": sub.Endpoint, "keys": sub.Keys, "expirationTime": "invalid"}, nil, 400)
+	h.call("POST", "/api/push", "", map[string]any{"endpoint": sub.Endpoint, "keys": sub.Keys, "unknown": true}, nil, 400)
 	h.s.mu.Lock()
 	defer h.s.mu.Unlock()
 	if len(h.s.state.Push) != 2 {

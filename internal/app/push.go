@@ -26,11 +26,17 @@ func validPush(s webpush.Subscription) bool {
 	return allowed && e1 == nil && e2 == nil && len(a) == 16 && len(p) == 65
 }
 func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
-	var in webpush.Subscription
+	// Browser PushSubscription.toJSON() includes this nullable timestamp. The
+	// delivery library only models endpoint/keys; decode the browser shape
+	// explicitly without weakening unknown-field validation for other inputs.
+	var in struct {
+		webpush.Subscription
+		ExpirationTime *uint64 `json:"expirationTime"`
+	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if !validPush(in) {
+	if !validPush(in.Subscription) {
 		fail(w, 400, "Unsupported push endpoint or invalid subscription")
 		return
 	}
@@ -46,7 +52,7 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "Too many notification devices")
 		return
 	}
-	s.state.Push = append(s.state.Push, in)
+	s.state.Push = append(s.state.Push, in.Subscription)
 	if err := s.persistLocked(); err != nil {
 		s.errorInternal(w, err)
 		return
