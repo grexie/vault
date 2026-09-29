@@ -1,0 +1,11 @@
+{
+  "name": "remote-ssh-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test web/crypto.test.js"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

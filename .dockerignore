@@ -1,0 +1,11 @@
+.git
+.local
+bin
+data
+node_modules
+test-results
+playwright-report
+*.db
+*.key
+*.pem
+.env

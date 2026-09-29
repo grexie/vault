@@ -1,0 +1,13 @@
+/bin/
+/data/
+/test-results/
+/playwright-report/
+/.local/
+*.db
+*.db.lock
+*.sock
+*.pem
+*.key
+.DS_Store
+node_modules/
+.env
