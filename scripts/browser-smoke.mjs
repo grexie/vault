@@ -93,7 +93,20 @@ try {
     const oldGet = navigator.credentials.get.bind(navigator.credentials);
     navigator.credentials.get = async (...args) => {
       try {
-        return await oldGet(...args);
+        const credential = await oldGet(...args);
+        if (args[0].publicKey.extensions?.largeBlob?.read) {
+          const outputs = credential.getClientExtensionResults();
+          // Safari's native assertion path includes didWrite=false on reads.
+          // Keep real assertions/PRF/blob storage, with only this output shape
+          // adjusted to exercise the iPhone/iPad interoperability regression.
+          Object.defineProperty(credential, "getClientExtensionResults", {
+            value: () => ({
+              ...outputs,
+              largeBlob: { ...outputs.largeBlob, written: false },
+            }),
+          });
+        }
+        return credential;
       } catch (e) {
         console.error("AUTHENTICATOR_ERROR", e.name, e.message);
         throw e;
@@ -123,6 +136,35 @@ try {
   await page
     .getByLabel("Key name", { exact: true })
     .fill("Generated test RSA key");
+  await page.getByLabel("SSH private key", { exact: true }).fill(privateKey);
+  await page.getByLabel("Existing key passphrase").fill(passphrase);
+  await page.route(
+    "**/api/key/read/finish",
+    (route) =>
+      route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Passkey verification failed" }),
+      }),
+    { times: 1 },
+  );
+  await page.getByRole("button", { name: "Save to device keychain" }).click();
+  await page
+    .locator("#message")
+    .filter({ hasText: "Passkey verification failed" })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("heading", { name: "Your SSH key" }).isVisible(),
+    true,
+  );
+  assert.equal(
+    await page.getByLabel("SSH private key", { exact: true }).inputValue(),
+    "",
+  );
+  assert.equal(
+    await page.getByLabel("Existing key passphrase").inputValue(),
+    "",
+  );
   await page.getByLabel("SSH private key", { exact: true }).fill(privateKey);
   await page.getByLabel("Existing key passphrase").fill(passphrase);
   await page.getByRole("button", { name: "Save to device keychain" }).click();
@@ -373,6 +415,10 @@ try {
       .status,
     "revoked",
   );
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+  await page.getByRole("heading", { name: "Requests", exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
     "PASS: real WebAuthn PRF/largeBlob virtual authenticator, encrypted RSA paste, local Wasm validation, PWA approval, CLI submit/status/wait, ssh-add signatures, live phone revocation, rejection, expiry, wait timeout, automatic exec cleanup, ssh-config auto-request, responsive layouts.",

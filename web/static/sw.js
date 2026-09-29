@@ -1,4 +1,4 @@
-const CACHE = "remote-ssh-v1";
+const CACHE = "remote-ssh-v1.0.1";
 const ASSETS = [
   "/",
   "/index.html",

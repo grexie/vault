@@ -294,7 +294,7 @@ func (s *Server) owner(h http.HandlerFunc) http.HandlerFunc {
 		expiry, ok := s.sessions[s.browser(r)]
 		s.mu.Unlock()
 		if !ok || time.Now().After(expiry) {
-			fail(w, 401, "Sign in with your passkey")
+			jsonReply(w, 401, map[string]string{"error": "Sign in with your passkey", "code": "session_required"})
 			return
 		}
 		h(w, r)

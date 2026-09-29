@@ -77,8 +77,8 @@ test("approval envelope binds the request and fingerprint to its ephemeral recip
     ),
   );
 });
-test("WebAuthn responses never upload PRF secrets or the encrypted blob", () => {
-  const encoded = publicCredential({
+function credentialWithOutputs(outputs, registration = false) {
+  return {
     id: "id",
     rawId: new Uint8Array([1]),
     type: "public-key",
@@ -86,14 +86,68 @@ test("WebAuthn responses never upload PRF secrets or the encrypted blob", () => 
     response: {
       clientDataJSON: new Uint8Array([1]),
       signature: new Uint8Array([2]),
+      ...(registration ? { attestationObject: new Uint8Array([3]) } : {}),
     },
-    getClientExtensionResults: () => ({
-      prf: { enabled: true, results: { first: new Uint8Array([9, 9, 9]) } },
-      largeBlob: { blob: new Uint8Array([8, 8]), written: true },
-    }),
-  });
+    getClientExtensionResults: () => outputs,
+  };
+}
+test("registration reports capabilities without uploading PRF secrets or the blob", () => {
+  const encoded = publicCredential(
+    credentialWithOutputs(
+      {
+        prf: { enabled: true, results: { first: new Uint8Array([9, 9, 9]) } },
+        largeBlob: {
+          supported: true,
+          blob: new Uint8Array([8, 8]),
+          written: false,
+        },
+      },
+      true,
+    ),
+    {
+      publicKey: {
+        extensions: { prf: {}, largeBlob: { support: "required" } },
+      },
+    },
+  );
   assert.deepEqual(encoded.clientExtensionResults, {
     prf: { enabled: true },
-    largeBlob: { written: true },
+    largeBlob: { supported: true },
   });
+});
+test("Safari largeBlob reads omit the unrelated written flag and all secret outputs", () => {
+  const credential = credentialWithOutputs({
+    prf: { results: { first: new Uint8Array([9, 9, 9]) } },
+    largeBlob: { blob: new Uint8Array([8, 8]), written: false },
+  });
+  const encoded = publicCredential(credential, {
+    publicKey: { extensions: { prf: { eval: {} }, largeBlob: { read: true } } },
+  });
+  assert.deepEqual(encoded.clientExtensionResults, {});
+});
+test("keychain writes preserve true and false outcomes for server verification", () => {
+  for (const written of [true, false]) {
+    const credential = credentialWithOutputs({
+      prf: { enabled: false, results: { first: new Uint8Array([9, 9, 9]) } },
+      largeBlob: { written, blob: new Uint8Array([8, 8]) },
+    });
+    const encoded = publicCredential(credential, {
+      publicKey: {
+        extensions: { prf: { eval: {} }, largeBlob: { write: "AA==" } },
+      },
+    });
+    assert.deepEqual(encoded.clientExtensionResults, {
+      largeBlob: { written },
+    });
+  }
+});
+test("ordinary sign-in does not forward unsolicited extension outputs", () => {
+  const encoded = publicCredential(
+    credentialWithOutputs({
+      prf: { enabled: false },
+      largeBlob: { written: false },
+    }),
+    { publicKey: {} },
+  );
+  assert.deepEqual(encoded.clientExtensionResults, {});
 });

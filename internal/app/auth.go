@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -106,9 +107,13 @@ func (s *Server) loginBegin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) verifyLocked(c ceremony, raw []byte) error {
 	cred, err := s.auth.FinishLogin(s.state.Owner, *c.Session, credentialRequest(raw))
 	if err != nil {
+		// Protocol errors describe the failed check; never log the credential
+		// response, keychain blob, PRF output, or library debug information.
+		log.Printf("passkey verification rejected: ceremony=%s detail=%q", c.Kind, err.Error())
 		return err
 	}
 	if cred.Authenticator.CloneWarning {
+		log.Printf("passkey verification rejected: ceremony=%s detail=authenticator-counter-rollback", c.Kind)
 		return errors.New("authenticator counter rollback")
 	}
 	s.state.Owner.Credential = *cred

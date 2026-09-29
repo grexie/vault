@@ -35,7 +35,7 @@ async function api(path, body, method) {
   });
   const v = await res.json();
   if (!res.ok) {
-    if (res.status === 401) {
+    if (res.status === 401 && v.code === "session_required") {
       state = null;
       renderLogin();
     }
@@ -100,7 +100,7 @@ function renderSetup() {
         );
       await api("/api/setup/finish", {
         ceremony: start.ceremony,
-        credential: publicCredential(c),
+        credential: publicCredential(c, start.options),
       });
       tab = "keychain";
       await refresh();
@@ -117,7 +117,7 @@ function renderLogin() {
       const c = await credential(start.options);
       await api("/api/auth/finish", {
         ceremony: start.ceremony,
-        credential: publicCredential(c),
+        credential: publicCredential(c, start.options),
       });
       await refresh();
     });
@@ -239,7 +239,7 @@ async function approve(id) {
     );
     await api("/api/requests/" + id + "/approve/finish", {
       ceremony: start.ceremony,
-      credential: publicCredential(c),
+      credential: publicCredential(c, start.options),
       envelope,
     });
     await refresh();
@@ -335,7 +335,7 @@ function renderKeychain() {
         if (prf) new Uint8Array(prf).fill(0);
         await api("/api/key/read/finish", {
           ceremony: start.ceremony,
-          credential: publicCredential(c),
+          credential: publicCredential(c, start.options),
         });
         const save = await api("/api/key/write/begin", {
           name: form.keyName.value,
@@ -348,7 +348,7 @@ function renderKeychain() {
           );
         await api("/api/key/write/finish", {
           ceremony: save.ceremony,
-          credential: publicCredential(written),
+          credential: publicCredential(written, save.options),
         });
         form.reset();
         await refresh();

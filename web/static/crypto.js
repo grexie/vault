@@ -24,17 +24,29 @@ export function optionsFromJSON(options) {
   return p;
 }
 // Never serialize PRF results or the largeBlob: both must remain on the phone.
-export function publicCredential(c) {
+export function publicCredential(c, options) {
   const ext = c.getClientExtensionResults();
+  const requested = options?.publicKey?.extensions || {};
+  const registration = !!c.response.attestationObject;
   const safe = {};
-  if (ext.prf && typeof ext.prf.enabled === "boolean")
+  if (registration && requested.prf && typeof ext.prf?.enabled === "boolean")
     safe.prf = { enabled: ext.prf.enabled };
-  if (ext.largeBlob) {
-    safe.largeBlob = {};
-    for (const k of ["supported", "written"])
-      if (typeof ext.largeBlob[k] === "boolean")
-        safe.largeBlob[k] = ext.largeBlob[k];
-  }
+  if (
+    registration &&
+    requested.largeBlob?.support &&
+    typeof ext.largeBlob?.supported === "boolean"
+  )
+    safe.largeBlob = { supported: ext.largeBlob.supported };
+  // Safari returns written=false even for largeBlob reads. Only a write
+  // ceremony has a write outcome; forwarding it on a read makes strict
+  // WebAuthn verification reject an otherwise valid assertion. Read outputs
+  // and PRF results remain exclusively on the device.
+  if (
+    !registration &&
+    requested.largeBlob?.write !== undefined &&
+    typeof ext.largeBlob?.written === "boolean"
+  )
+    safe.largeBlob = { written: ext.largeBlob.written };
   const response = { clientDataJSON: b64url(c.response.clientDataJSON) };
   for (const key of [
     "attestationObject",
