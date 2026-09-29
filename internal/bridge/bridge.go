@@ -139,6 +139,9 @@ func Request(ctx context.Context, c Config, session, reason string, duration tim
 		if e != nil {
 			return "", fmt.Errorf("cannot verify the previous request; use revoke to clear it: %w", e)
 		}
+		if q.Mode == "persistent" {
+			return "", errors.New("this session is a persistent grant; use connect or revoke it explicitly")
+		}
 		if q.Status == "active" || q.Status == "pending" {
 			if !ensure {
 				return "", errors.New("session already open; use wait, ensure, or revoke")
@@ -323,6 +326,12 @@ func Revoke(ctx context.Context, c Config, session string) error {
 	l, _, _, loadErr := loadLease(c, session)
 	if loadErr == nil {
 		e = leaseClient(l).Call(ctx, "POST", "/v1/requests/"+l.Request.ID+"/revoke", l.Capability, map[string]any{}, nil)
+		// Ordinary capabilities are intentionally discarded on server restart.
+		// The paired client can still revoke/clear its own named session. Job
+		// configs have no pairing authority and must never take this fallback.
+		if e != nil && l.Request.Mode != "connection" {
+			e = client.Call(ctx, "POST", "/v1/revoke", c.Token, map[string]string{"session": session}, nil)
+		}
 	} else {
 		e = client.Call(ctx, "POST", "/v1/revoke", c.Token, map[string]string{"session": session}, nil)
 	}
