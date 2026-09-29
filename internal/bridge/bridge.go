@@ -6,6 +6,7 @@ package bridge
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/grexie/remote-ssh-agent/internal/access"
 	"github.com/grexie/remote-ssh-agent/internal/app"
 	"github.com/grexie/remote-ssh-agent/internal/limits"
 	"github.com/grexie/remote-ssh-agent/internal/signer"
@@ -29,9 +31,11 @@ import (
 )
 
 type Lease struct {
-	Request    app.Request `json:"request"`
-	Capability string      `json:"capability"`
-	Config     Config      `json:"config"`
+	SigningKey      []byte      `json:"signingKey,omitempty"`
+	Request         app.Request `json:"request"`
+	Capability      string      `json:"capability"`
+	ConnectionToken string      `json:"connectionToken,omitempty"`
+	Config          Config      `json:"config"`
 }
 
 func RuntimeDir() (string, error) {
@@ -107,11 +111,15 @@ func Status(ctx context.Context, c Config, session string) (app.Request, error) 
 		return app.Request{}, e
 	}
 	var q app.Request
-	e = New(c).Call(ctx, "GET", "/v1/requests/"+l.Request.ID, l.Capability, nil, &q)
+	e = leaseClient(l).Call(ctx, "GET", "/v1/requests/"+l.Request.ID, l.Capability, nil, &q)
 	return q, e
 }
 
-func Request(ctx context.Context, c Config, session, reason string, duration time.Duration, ensure, noWait bool, progress func(string)) (string, error) {
+func Request(ctx context.Context, c Config, session, reason string, duration time.Duration, allowed string, ensure, noWait bool, progress func(string)) (string, error) {
+	allowed, e := access.Normalize(allowed)
+	if e != nil {
+		return "", e
+	}
 	if duration < time.Second || duration > limits.MaxLeaseDuration {
 		return "", errors.New("duration must be between 1s and 48h")
 	}
@@ -127,7 +135,7 @@ func Request(ctx context.Context, c Config, session, reason string, duration tim
 	client := New(c)
 	if old, _, _, err := loadLease(c, session); err == nil {
 		var q app.Request
-		e = client.Call(ctx, "GET", "/v1/requests/"+old.Request.ID, old.Capability, nil, &q)
+		e = leaseClient(old).Call(ctx, "GET", "/v1/requests/"+old.Request.ID, old.Capability, nil, &q)
 		if e != nil {
 			return "", fmt.Errorf("cannot verify the previous request; use revoke to clear it: %w", e)
 		}
@@ -135,8 +143,9 @@ func Request(ctx context.Context, c Config, session, reason string, duration tim
 			if !ensure {
 				return "", errors.New("session already open; use wait, ensure, or revoke")
 			}
-			if q.Reason != reason || q.DurationSeconds != int(duration.Seconds()) {
-				return "", errors.New("existing session has a different justification or duration; revoke it first")
+			oldAccess, _ := access.Normalize(q.Access)
+			if q.Reason != reason || q.DurationSeconds != int(duration.Seconds()) || oldAccess != allowed {
+				return "", errors.New("existing session has different access, justification, or duration; revoke it first")
 			}
 			old.Request = q
 			if noWait {
@@ -160,16 +169,25 @@ func Request(ctx context.Context, c Config, session, reason string, duration tim
 		return "", e
 	}
 	socket := filepath.Join(dir, "agent.sock")
+	public, private, e := ed25519.GenerateKey(rand.Reader)
+	if e != nil {
+		return "", e
+	}
 	var l Lease
-	e = client.Call(ctx, "POST", "/v1/requests", c.Token, map[string]any{"session": session, "reason": reason, "socket": socket, "durationSeconds": int(duration.Seconds())}, &l)
+	body := map[string]any{"session": session, "reason": reason, "socket": socket, "durationSeconds": int(duration.Seconds()), "requestKey": public}
+	if allowed != access.SSH {
+		body["access"] = allowed
+	}
+	e = client.Call(ctx, "POST", "/v1/requests", c.Token, body, &l)
 	if e != nil {
 		_ = os.Remove(dir)
 		return "", e
 	}
 	l.Config = c
+	l.SigningKey = private
 	encoded, _ := json.Marshal(l)
 	if e = os.WriteFile(state, encoded, 0600); e != nil {
-		_ = client.Call(ctx, "POST", "/v1/requests/"+l.Request.ID+"/revoke", l.Capability, map[string]any{}, nil)
+		_ = leaseClient(l).Call(ctx, "POST", "/v1/requests/"+l.Request.ID+"/revoke", l.Capability, map[string]any{}, nil)
 		_ = os.Remove(dir)
 		return "", e
 	}
@@ -193,11 +211,15 @@ func Wait(ctx context.Context, c Config, session string, progress func(string)) 
 	if e != nil {
 		return "", e
 	}
+	if l.Request.Mode == "persistent" {
+		_, e = waitGrant(ctx, l, progress)
+		return "", e
+	}
 	return waitAndStart(ctx, l, state, alias, progress)
 }
 
 func waitAndStart(ctx context.Context, l Lease, state, alias string, progress func(string)) (socket string, err error) {
-	client := New(l.Config)
+	client := leaseClient(l)
 	ok := false
 	defer func() {
 		if !ok {
@@ -298,13 +320,19 @@ func Revoke(ctx context.Context, c Config, session string) error {
 		return e
 	}
 	client := New(c)
-	if e = client.Call(ctx, "POST", "/v1/revoke", c.Token, map[string]string{"session": session}, nil); e != nil {
+	l, _, _, loadErr := loadLease(c, session)
+	if loadErr == nil {
+		e = leaseClient(l).Call(ctx, "POST", "/v1/requests/"+l.Request.ID+"/revoke", l.Capability, map[string]any{}, nil)
+	} else {
+		e = client.Call(ctx, "POST", "/v1/revoke", c.Token, map[string]string{"session": session}, nil)
+	}
+	if e != nil {
 		return e
 	}
 	// The worker has been reaped remotely. Remove the alias immediately; the
 	// bridge observes terminal status and closes all existing local connections.
 	_ = os.Remove(alias)
-	var l Lease
+	l = Lease{}
 	if b, e := os.ReadFile(state); e == nil && json.Unmarshal(b, &l) == nil {
 		_ = os.Remove(l.Request.Socket)
 	}
@@ -313,7 +341,7 @@ func Revoke(ctx context.Context, c Config, session string) error {
 }
 
 func Run(ctx context.Context, l Lease, ready func() error) error {
-	client := New(l.Config)
+	client := leaseClient(l)
 	var q app.Request
 	if e := client.Call(ctx, "GET", "/v1/requests/"+l.Request.ID, l.Capability, nil, &q); e != nil {
 		return e

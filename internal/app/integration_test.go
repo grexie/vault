@@ -28,6 +28,7 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/fxamacker/cbor/v2"
+	"github.com/grexie/remote-ssh-agent/internal/proof"
 	"github.com/grexie/remote-ssh-agent/internal/signer"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/ssh"
@@ -45,6 +46,7 @@ func TestMain(m *testing.M) {
 }
 
 type harness struct {
+	requestKeys        map[string]ed25519.PrivateKey
 	t                  *testing.T
 	s                  *Server
 	http               *http.Client
@@ -78,7 +80,7 @@ func newHarness(t *testing.T) *harness {
 	_, _ = rand.Read(id)
 	_, key, _ := ed25519.GenerateKey(rand.Reader)
 	sshKey, _ := ssh.NewSignerFromKey(key)
-	h := &harness{t: t, s: s, http: &http.Client{Jar: jar, Timeout: 10 * time.Second}, origin: origin, authKey: authKey, credentialID: id, key: key, fingerprint: ssh.FingerprintSHA256(sshKey.PublicKey())}
+	h := &harness{requestKeys: map[string]ed25519.PrivateKey{}, t: t, s: s, http: &http.Client{Jar: jar, Timeout: 10 * time.Second}, origin: origin, authKey: authKey, credentialID: id, key: key, fingerprint: ssh.FingerprintSHA256(sshKey.PublicKey())}
 	h.register()
 	h.saveKey()
 	var client struct {
@@ -91,8 +93,18 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) call(method, path, token string, in, out any, want int) {
 	h.t.Helper()
 	var body io.Reader
+	var encoded []byte
+	var private ed25519.PrivateKey
+	if method == "POST" && (path == "/v1/requests" || strings.HasSuffix(path, "/connect")) {
+		if fields, ok := in.(map[string]any); ok {
+			public, key, _ := ed25519.GenerateKey(rand.Reader)
+			private = key
+			fields["requestKey"] = public
+		}
+	}
 	if in != nil {
 		b, _ := json.Marshal(in)
+		encoded = b
 		body = bytes.NewReader(b)
 	}
 	r, _ := http.NewRequest(method, h.origin+path, body)
@@ -103,6 +115,14 @@ func (h *harness) call(method, path, token string, in, out any, want int) {
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
+	if strings.HasPrefix(path, "/v1/requests/") {
+		id := strings.Split(strings.TrimPrefix(path, "/v1/requests/"), "/")[0]
+		if key := h.requestKeys[id]; len(key) > 0 {
+			if e := proof.Sign(r, encoded, key); e != nil {
+				h.t.Fatal(e)
+			}
+		}
+	}
 	res, e := h.http.Do(r)
 	if e != nil {
 		h.t.Fatal(e)
@@ -111,6 +131,13 @@ func (h *harness) call(method, path, token string, in, out any, want int) {
 	b, _ := io.ReadAll(res.Body)
 	if res.StatusCode != want {
 		h.t.Fatalf("%s %s: got %d, want %d: %s", method, path, res.StatusCode, want, b)
+	}
+	if len(private) > 0 && res.StatusCode == 201 {
+		var created struct {
+			Request Request `json:"request"`
+		}
+		json.Unmarshal(b, &created)
+		h.requestKeys[created.Request.ID] = private
 	}
 	if out != nil {
 		if e = json.Unmarshal(b, out); e != nil {

@@ -2,7 +2,7 @@
 
 A self-contained Go application that asks for passkey approval on your iPhone or iPad before an agent can use your SSH key. One binary contains the PWA, WebAuthn server, BoltDB metadata store, isolated signing workers, and CLI.
 
-Every request requires a session name, a justification, and a duration. Approval unlocks a separate signer and a dedicated local Unix socket. Expiry, phone revocation, or CLI revocation locks that grant. The CLI only gets a signing capability; it never receives the private key.
+SSH requests require a session name, a justification, and an explicit timed or persistent policy. Approval unlocks a signer on the server; the requesting client creates its dedicated local Unix socket. Expiry, phone revocation, or CLI revocation locks that grant. The CLI only gets a signing capability; it never receives the private key.
 
 ## Requirements
 
@@ -48,7 +48,7 @@ Use an origin whose external port matches your URL, e.g. `https://ssh-agent.exam
 
 First startup prints a one-time owner setup token. Open the PWA, enter it, and create a passkey. The token's hash lives in BoltDB and becomes unusable after enrollment. If you lose the token before enrollment, restart with `--reset-setup` to issue a new one. Protect startup logs until enrollment finishes. This is a single-owner application; multiple CLI clients and notification devices belong to that owner.
 
-All persistent server state is in `data/metadata.db` (BoltDB via `bbolt`): WebAuthn public credentials, key name/fingerprint, hashed client credentials, request history, push subscriptions, and VAPID keys. The directory is mode `0700`, the database `0600`. No live grants, decryption keys, or SSH private keys are restored after restart.
+All persistent server state is in `data/metadata.db` (BoltDB via `bbolt`): WebAuthn public credentials, key name/fingerprint, hashed client credentials, request history, push subscriptions, and VAPID keys. The directory is mode `0700`, the database `0600`. Persistent grant metadata and token hashes survive restart in a locked state. No unlocked signer, decryption key, or SSH private key is restored.
 
 ## Set up the phone and tablet
 
@@ -142,3 +142,85 @@ Playwright is a development-only dependency. This test covers paste validation, 
 Tests use newly generated keys and synthetic WebAuthn credentials. They exercise encrypted key formats, fresh user verification, challenge/origin/replay rejection, independent grants, expiry, revocation, restart behavior, browser envelope encryption, and multi-device notification registration. Physical iPhone/iPad keychain synchronization and real APNs delivery require device acceptance testing; automated tests do not establish those claims.
 
 Protocol references: [WebAuthn PRF](https://www.w3.org/TR/webauthn-3/#prf-extension), [largeBlob](https://www.w3.org/TR/webauthn-3/#sctn-large-blob-extension), [Home Screen Web Push](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/).
+
+## Sockets on other computers
+
+Pair each client with the Sentinel HTTPS origin. Run `request` on the computer that will run `ssh`, whether that is a Mac mini, a Linux server, or a CI runner. The returned `SSH_AUTH_SOCK` is created **on that client**, not on Sentinel. Each request has its own socket; there is no socket mount or SSH agent forwarding between machines.
+
+```text
+ssh on client → client-only Unix socket → authenticated HTTPS → Sentinel → private pipe → signer
+```
+
+Sentinel creates no SSH-agent listener for a remote unlock. Each client request also has its own generated Ed25519 proof key. The server requires a fresh signature over every capability-authenticated operation, including its method, URL, body, timestamp and nonce. Copying a request capability alone cannot use that request from another machine. This is possession of a software key, not hardware attestation: copying the complete client state can copy its authority. The local socket and request state are accessible to the same OS user and root.
+
+## Age documents and stdin
+
+Encryption uses the saved **public** SSH recipient, works unattended, and creates no lease or notification:
+
+```sh
+remote-ssh-agent encrypt -o report.age report.txt
+printf '%s\n' 'example document' | remote-ssh-agent encrypt --armor > example.age
+```
+
+Use `-r 'ssh-ed25519 AAAA…'` / `--recipient` or `-R recipients.txt` / `--recipients-file` for explicit public recipients, including offline encryption without pairing. Options can be repeated. Native age public recipients are also accepted for encryption. A saved key from an older app version publishes its public recipient on the next successful approval or key save; until then, supply a public recipient explicitly. Encryption never triggers approval as a fallback.
+
+One-shot decryption asks for approval of that document without creating a reusable lease, local socket, or on-disk request capability:
+
+```sh
+remote-ssh-agent decrypt --reason 'Read the deployment report to investigate the failure' \
+  -o report.decrypted.txt report.age
+cat example.age | remote-ssh-agent decrypt --reason 'Read this supplied example document'
+```
+
+The approval is bound to the SHA-256 digest of the canonical age header. The worker releases one document file key, then is destroyed before responding. The approval can be consumed only once and expires one minute after approval if unused. Pending approvals expire after five minutes. Rejection and timeout fail the command.
+
+For repeated decryption, request an explicitly scoped lease:
+
+```sh
+remote-ssh-agent request --session review-docs --access age \
+  --reason 'Review the encrypted incident documents' --duration 15m
+remote-ssh-agent decrypt --session review-docs -o incident.txt incident.age
+remote-ssh-agent revoke --session review-docs
+```
+
+`--access ssh` is the default. `--access age` cannot authenticate SSH, and an ordinary SSH lease cannot decrypt. `--access ssh,age` must be requested and approved explicitly. The saved key must be RSA or Ed25519 for age decryption, and documents must be encrypted to its matching SSH recipient. ECDSA remains usable for SSH, but not age. This follows the [upstream age SSH recipient format](https://pkg.go.dev/filippo.io/age/agessh).
+
+Only the bounded age header (up to 64 KiB) is sent to Sentinel. Document bodies and plaintext are processed locally. The CLI receives a per-document file key, never the SSH private key. Revocation stops new header decryptions; it cannot recall a released file key or plaintext. Output files are mode `0600`, must not already exist, and are removed on failure. Stdout streams data, so check the exit status: bytes already emitted cannot be retracted after a later integrity error. Put flags before the optional input path; `-` means stdin/stdout.
+
+## Persistent grants for GitHub Actions
+
+A persistent grant authorizes future job connections until you revoke it. It appears alongside normal active requests in the app, with its justification and inactivity timeout. Create it on an already paired trusted computer and approve it once:
+
+```sh
+remote-ssh-agent grant create --session github-deploy \
+  --reason 'Allow the protected production deployment workflow to authenticate over SSH' \
+  --idle-timeout 30d
+remote-ssh-agent grant export --session github-deploy \
+  --github-repo OWNER/REPO --secret REMOTE_SSH_CONNECTION
+```
+
+The export command invokes `gh secret set` with the token on stdin; it does not put the secret in arguments or print it. `--environment production` targets a GitHub environment secret. Authenticate `gh` for the intended repository first. `--token-stdout` is an explicit alternative for piping to a different secret store; do not log it. `grant create --no-wait`, `status --session`, and `wait --session` support asynchronous initial approval. A successful `wait` for a persistent grant emits no socket; jobs create their own sockets with `connect`.
+
+**Inactivity defaults to 30 days**, configurable from `1s` to `365d` with day/hour/minute/second suffixes. Successful new job connections and SSH signatures reset it. Status checks, failed operations, and identity listing do not. On inactivity or server restart, the key locks and existing job sockets close, while the connection token remains valid. The first subsequent `connect` sends a fresh approval notification and waits (five minutes by default, configurable with `--timeout`). Simultaneous waiting jobs share one approval. Denial or timeout fails the waiting jobs and leaves an already-approved persistent grant locked; it does not silently retry. Explicit revocation invalidates the token permanently.
+
+On a runner that has joined the tailnet:
+
+```sh
+# REMOTE_SSH_CONNECTION is supplied by GitHub Secrets, never a private SSH key.
+printf '%s' "$REMOTE_SSH_CONNECTION" | remote-ssh-agent connect \
+  --token-stdin --config "$RUNNER_TEMP/remote-ssh.json" \
+  --session "deploy-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" --duration 1h \
+  -- sh -c 'ssh -o IdentityAgent="$SSH_AUTH_SOCK" -o IdentityFile=none -o IdentitiesOnly=no -o BatchMode=yes deploy@server.example.com true'
+```
+
+`connect` requires a new config path and refuses to overwrite a paired CLI config. It creates a unique local socket and a job-scoped proof key/capability. With a command after `--`, it cleans up that job on exit without revoking the parent grant. Without a command it prints only the socket path; use `revoke --config PATH --session NAME` afterward. Each job has a bounded lifetime of `1s`–`48h` (default `1h`). Job stdin is consumed by the token; pass command input through files. Socket activity does not enforce the job's SSH destinations or commands.
+
+[The example workflow](examples/github-actions.yml) joins Tailscale with `tailscale/github-action@v4`, OIDC client ID/audience, `id-token: write`, and an ephemeral tagged node. Configure a [Tailscale federated identity](https://tailscale.com/docs/features/workload-identity-federation) restricted to the intended repository and branch/environment. Allow that tag to reach Sentinel's HTTPS port and the required SSH destinations in tailnet policy. Keep pinned SSH host keys in `SSH_KNOWN_HOSTS`; never replace verification with `StrictHostKeyChecking=no`. Review and pin action/source revisions for your deployment.
+
+The connection token can create jobs from any client that possesses it and can reach Sentinel; it is not restricted to one physical runner. Keep it in a protected repository/environment and do not expose it to untrusted workflows. Each resulting job capability is separately bound to that runner's generated key. Tailscale OIDC controls network admission; this app controls SSH signing approval. No server SSH private key is distributed to GitHub.
+
+```sh
+remote-ssh-agent revoke --session github-deploy
+```
+
+Revoking the persistent grant closes every attached job socket and kills its signer. It does not terminate already-authenticated SSH connections. Upgrade all clients with the server: client proof binding requires this version's CLI.

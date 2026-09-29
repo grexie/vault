@@ -25,7 +25,7 @@ func main() {
 		if err != nil {
 			return map[string]any{"error": err.Error()}
 		}
-		return map[string]any{"fingerprint": ssh.FingerprintSHA256(key.PublicKey()), "type": key.PublicKey().Type(), "compact": compact}
+		return map[string]any{"fingerprint": ssh.FingerprintSHA256(key.PublicKey()), "publicKey": string(ssh.MarshalAuthorizedKey(key.PublicKey())), "type": key.PublicKey().Type(), "compact": compact}
 	}))
 	js.Global().Call("postMessage", map[string]any{"ready": true})
 	select {}

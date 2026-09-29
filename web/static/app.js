@@ -123,6 +123,7 @@ function renderLogin() {
     });
 }
 function durationLabel(n) {
+  if (n > 172800 && n % 86400 === 0) return `${n / 86400} days`;
   if (n < 60) return n + " sec";
   if (n < 3600) return Math.round(n / 60) + " min";
   const hours = Math.floor(n / 3600),
@@ -146,7 +147,7 @@ function time(t) {
 }
 function chrome(content) {
   const requests = Object.values(state.requests || {}),
-    pending = requests.filter((q) => q.status === "pending").length;
+    pending = requests.filter((q) => q.status === "pending" && !q.grantId).length;
   root.innerHTML = `<div class="workspace"><nav class="tabs" aria-label="Main navigation"><button data-tab="requests" class="${tab === "requests" ? "selected" : ""}">Requests ${pending ? `<span class="count">${pending}</span>` : ""}</button><button data-tab="keychain" class="${tab === "keychain" ? "selected" : ""}">Keychain</button><button data-tab="clients" class="${tab === "clients" ? "selected" : ""}">CLI clients</button><button id="signout" class="signout">Sign out</button></nav>${content}</div>`;
   root.querySelectorAll("[data-tab]").forEach(
     (b) =>
@@ -176,11 +177,11 @@ function renderRequests() {
   const all = Object.values(state.requests || {}).sort(
     (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
   );
-  const pending = all.filter((q) => q.status === "pending"),
-    active = all.filter((q) => q.status === "active"),
-    history = all.filter((q) => !["pending", "active"].includes(q.status));
+  const pending = all.filter((q) => q.status === "pending" && !q.grantId),
+    active = all.filter((q) => ["active", "locked"].includes(q.status)),
+    history = all.filter((q) => !["pending", "active", "locked"].includes(q.status));
   chrome(
-    `<div class="page-heading"><div><h1>Requests</h1><p>${pending.length} awaiting approval · ${active.length} active</p></div><button id="notifications" class="secondary">Enable notifications</button></div>${!state.key.fingerprint ? '<div class="notice">Add your SSH key in <button id="open-keychain" class="text-button">Keychain</button> to get started.</div>' : ""}<section><div class="section-heading"><h2>Awaiting approval</h2></div>${pending.length ? pending.map(requestCard).join("") : '<div class="empty"><h3>No requests</h3><p>New SSH access requests will appear here.</p></div>'}</section><section class="section"><div class="section-heading"><h2>Active sessions</h2></div>${active.length ? active.map(requestCard).join("") : '<p class="empty-inline">No active sessions.</p>'}</section>${
+    `<div class="page-heading"><div><h1>Requests</h1><p>${pending.length} awaiting approval · ${active.length} active</p></div><button id="notifications" class="secondary">Enable notifications</button></div>${!state.key.fingerprint ? '<div class="notice">Add your SSH key in <button id="open-keychain" class="text-button">Keychain</button> to get started.</div>' : ""}<section><div class="section-heading"><h2>Awaiting approval</h2></div>${pending.length ? pending.map(requestCard).join("") : '<div class="empty"><h3>No requests</h3><p>New access requests will appear here.</p></div>'}</section><section class="section"><div class="section-heading"><h2>Active sessions</h2></div>${active.length ? active.map(requestCard).join("") : '<p class="empty-inline">No active sessions.</p>'}</section>${
       history.length
         ? `<section class="section"><div class="section-heading"><h2>Recent activity</h2></div><div class="history">${history
             .slice(0, 10)
@@ -190,7 +191,7 @@ function renderRequests() {
             )
             .join("")}</div></section>`
         : ""
-    }<p class="session-note">${state.pushSubscriptions ? `${state.pushSubscriptions} notification device${state.pushSubscriptions === 1 ? "" : "s"} connected.` : "For notifications, add this app to your Home Screen and enable them on each device."} Revoking access stops new authentication; existing SSH connections stay connected.</p>`,
+    }<p class="session-note">${state.pushSubscriptions ? `${state.pushSubscriptions} notification device${state.pushSubscriptions === 1 ? "" : "s"} connected.` : "For notifications, add this app to your Home Screen and enable them on each device."} Revocation stops new authentication and document decryption. Existing connections and already decrypted documents remain available.</p>`,
   );
   document.querySelector("#notifications").onclick = () =>
     action(enableNotifications);
@@ -207,7 +208,7 @@ function renderRequests() {
     (b) =>
       (b.onclick = () =>
         action(async () => {
-          await api("/api/requests/" + b.dataset.revoke + "/revoke", {});
+          await api("/api/requests/" + b.dataset.revoke + "/revoke", { permanent: b.dataset.permanent === "true" });
           await refresh();
           toast("Access ended. The signer is locked.");
         })),
@@ -218,10 +219,23 @@ function renderRequests() {
       .getElementById("request-" + focus)
       ?.scrollIntoView({ block: "nearest" });
 }
-function requestCard(q) {
-  const pending = q.status === "pending";
-  return `<article class="request-card" id="request-${esc(q.id)}"><div class="request-top"><div><h3>${esc(q.session)}</h3><p>${esc(q.clientName)}</p></div><span class="badge ${pending ? "pending" : "active"}">${pending ? "Pending" : "Active"}</span></div><p class="reason">${esc(q.reason)}</p><div class="request-details"><span>${esc(q.keyName)}</span><span>${durationLabel(q.durationSeconds)}</span><span class="remaining">${pending ? "Request expires" : "Access ends"} in <b data-countdown="${esc(q.id)}">${countdown(q)}</b></span></div><details><summary>Details</summary><dl><dt>Fingerprint</dt><dd>${esc(q.fingerprint)}</dd><dt>Requested socket</dt><dd>${esc(q.socket)}</dd><dt>Request ID</dt><dd>${esc(q.id)}</dd></dl><p class="small">The client supplied this session name, purpose, and socket path.</p></details><div class="request-actions">${pending ? `<button class="secondary" data-revoke="${esc(q.id)}">Deny</button><button class="primary" data-approve="${esc(q.id)}">Approve for ${durationLabel(q.durationSeconds)}</button>` : `<button class="danger" data-revoke="${esc(q.id)}">Revoke access</button>`}</div></article>`;
+function accessLabel(q) {
+  if (q.mode === "age-once") return "Decrypt this document once";
+  if (q.access === "age") return "Age decryption";
+  if (q.access === "ssh,age") return "SSH authentication and age decryption";
+  return "SSH authentication";
 }
+function requestCard(q) {
+  const pending = q.status === "pending", locked = q.status === "locked", persistent = q.mode === "persistent";
+  const duration = persistent ? "Until revoked" : q.mode === "age-once" ? "One document" : durationLabel(q.durationSeconds);
+  const timing = persistent && !pending
+    ? (locked ? "Locked · approval required on next connection" : `Locks after ${durationLabel(q.idleSeconds)} of inactivity`)
+    : `${pending ? "Request expires" : "Access ends"} in <b data-countdown="${esc(q.id)}">${countdown(q)}</b>`;
+  const detail = q.mode === "age-once" ? `<dt>Document header digest</dt><dd>${esc(q.headerHash)}</dd>` : q.socket ? `<dt>Local socket</dt><dd>${esc(q.socket)}</dd>` : `<dt>Inactivity timeout</dt><dd>${durationLabel(q.idleSeconds)}</dd>`;
+  const approveLabel = persistent ? (locked || q.lastUsedAt && !q.lastUsedAt.startsWith("0001") ? "Unlock grant" : "Approve persistent access") : q.mode === "age-once" ? "Decrypt once" : `Approve for ${durationLabel(q.durationSeconds)}`;
+  return `<article class="request-card" id="request-${esc(q.id)}"><div class="request-top"><div><h3>${esc(q.session)}</h3><p>${esc(q.clientName)}</p></div><span class="badge ${pending || locked ? "pending" : "active"}">${locked ? "Locked" : pending ? "Pending" : persistent ? "Persistent" : "Active"}</span></div><p class="reason">${esc(q.reason)}</p><p class="small">${esc(accessLabel(q))}${persistent ? " · New jobs can connect without approval while unlocked." : ""}</p><div class="request-details"><span>${esc(q.keyName)}</span><span>${duration}</span><span class="remaining">${timing}</span></div><details><summary>Details</summary><dl><dt>Fingerprint</dt><dd>${esc(q.fingerprint)}</dd>${detail}<dt>Request ID</dt><dd>${esc(q.id)}</dd></dl><p class="small">The client supplied this session name and purpose. Socket paths belong to the requesting machine.</p></details><div class="request-actions"><button class="${pending ? "secondary" : "danger"}" data-revoke="${esc(q.id)}">${pending ? "Deny" : "Revoke access"}</button>${pending && persistent && q.lastUsedAt && !q.lastUsedAt.startsWith("0001") ? `<button class="danger" data-revoke="${esc(q.id)}" data-permanent="true">Revoke grant</button>` : ""}${pending || locked ? `<button class="primary" data-approve="${esc(q.id)}">${approveLabel}</button>` : ""}</div></article>`;
+}
+
 async function approve(id) {
   const start = await api("/api/requests/" + id + "/approve/begin", {});
   const c = await credential(start.options);
@@ -314,7 +328,7 @@ function parseKey(key, passphrase) {
 }
 function renderKeychain() {
   chrome(
-    `<div class="page-heading"><div><h1>Your SSH key</h1><p>Stored with your passkey, encrypted on this device.</p></div><span class="badge ${state.key.fingerprint ? "active" : "pending"}">${state.key.fingerprint ? "Key connected" : "Setup needed"}</span></div><div class="key-layout"><form id="key-form" class="form-card"><h2>${state.key.fingerprint ? "Replace your saved key" : "Paste an existing key"}</h2><p>Paste the complete private key, including its BEGIN and END lines. Encrypted OpenSSH and PEM / PKCS#8 keys are supported.</p><label for="key-name">Key name</label><input name="keyName" id="key-name" required maxlength="80" value="${esc(state.key.name)}" placeholder="Personal SSH key"><label for="private-key">SSH private key</label><textarea name="privateKey" id="private-key" required spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" rows="9" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;Paste your private key here&#10;-----END OPENSSH PRIVATE KEY-----"></textarea><label for="key-passphrase">Existing key passphrase <span class="optional">if encrypted</span></label><input name="passphrase" id="key-passphrase" type="password" autocomplete="off" placeholder="The password that currently protects this key"><p class="small">The key is unlocked locally with its current passphrase, then re-encrypted with your passkey. The old passphrase is not saved. Two passkey prompts encrypt and save the key. ${state.key.fingerprint ? "Replacing the key revokes all open requests." : ""}</p><button class="primary" type="submit">${icon("key")} Save to device keychain</button></form><aside class="side-panel"><h3>Storage</h3><p>The server keeps your key’s name and fingerprint. It does not store the private key, passphrase, or encrypted keychain blob.</p>${state.key.fingerprint ? `<div class="fingerprint"><span>Saved fingerprint</span><code>${esc(state.key.fingerprint)}</code></div>` : ""}<hr><h3>Recovery</h3><p>Keychain storage limits and sync vary by provider. Confirm that the key is available on another device before depending on sync for recovery.</p><p class="small">An approval unlocks the key in a separate signer process on your server for that request’s lifetime.</p></aside></div>`,
+    `<div class="page-heading"><div><h1>Your SSH key</h1><p>Stored with your passkey, encrypted on this device.</p></div><span class="badge ${state.key.fingerprint ? "active" : "pending"}">${state.key.fingerprint ? "Key connected" : "Setup needed"}</span></div><div class="key-layout"><form id="key-form" class="form-card"><h2>${state.key.fingerprint ? "Replace your saved key" : "Paste an existing key"}</h2><p>Paste the complete private key, including its BEGIN and END lines. Encrypted OpenSSH and PEM / PKCS#8 keys are supported.</p><label for="key-name">Key name</label><input name="keyName" id="key-name" required maxlength="80" value="${esc(state.key.name)}" placeholder="Personal SSH key"><label for="private-key">SSH private key</label><textarea name="privateKey" id="private-key" required spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" rows="9" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;Paste your private key here&#10;-----END OPENSSH PRIVATE KEY-----"></textarea><label for="key-passphrase">Existing key passphrase <span class="optional">if encrypted</span></label><input name="passphrase" id="key-passphrase" type="password" autocomplete="off" placeholder="The password that currently protects this key"><p class="small">The key is unlocked locally with its current passphrase, then re-encrypted with your passkey. The old passphrase is not saved. Two passkey prompts encrypt and save the key. ${state.key.fingerprint ? "Replacing the key revokes all open requests." : ""}</p><button class="primary" type="submit">${icon("key")} Save to device keychain</button></form><aside class="side-panel"><h3>Storage</h3><p>The server keeps your public key, name and fingerprint for unattended encryption. It does not store the private key, passphrase, or encrypted keychain blob.</p>${state.key.fingerprint ? `<div class="fingerprint"><span>Saved fingerprint</span><code>${esc(state.key.fingerprint)}</code></div>` : ""}<hr><h3>Recovery</h3><p>Keychain storage limits and sync vary by provider. Confirm that the key is available on another device before depending on sync for recovery.</p><p class="small">An approval unlocks the key in a separate signer process on your server for that request’s lifetime.</p></aside></div>`,
   );
   document.querySelector("#key-form").onsubmit = (e) => {
     e.preventDefault();
@@ -346,6 +360,7 @@ function renderKeychain() {
         const save = await api("/api/key/write/begin", {
           name: form.keyName.value,
           fingerprint: parsed.fingerprint,
+          publicKey: parsed.publicKey,
         });
         const written = await credential(save.options, false, blob);
         if (!written.getClientExtensionResults().largeBlob?.written)

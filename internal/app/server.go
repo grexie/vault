@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -17,6 +19,7 @@ import (
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
+	"github.com/grexie/remote-ssh-agent/internal/proof"
 	"github.com/grexie/remote-ssh-agent/internal/signer"
 	"github.com/grexie/remote-ssh-agent/internal/vault"
 	"github.com/grexie/remote-ssh-agent/web"
@@ -28,11 +31,15 @@ type Config struct {
 }
 type ceremony struct {
 	Kind, Browser, RequestID, KeyName, Fingerprint string
+	PublicKey                                      string
 	Session                                        *webauthn.SessionData
 	Owner                                          *Owner
 	Expires                                        time.Time
 }
+type bodyDigestKey struct{}
+
 type liveRequest struct {
+	Nonces         map[string]time.Time
 	CapabilityHash string
 	Worker         *signer.Worker
 }
@@ -93,8 +100,17 @@ func New(cfg Config) (*Server, error) {
 	if s.state.Requests == nil {
 		s.state.Requests = map[string]*Request{}
 	}
+	if s.state.Grants == nil {
+		s.state.Grants = map[string]grantSecrets{}
+	}
+	for id, secrets := range s.state.Grants {
+		s.live[id] = &liveRequest{CapabilityHash: secrets.CapabilityHash}
+	}
 	for _, r := range s.state.Requests {
-		if active(r) {
+		if r.Mode == "persistent" && (r.Status == "active" || r.Status == "locked" || r.Status == "pending" && !r.LastUsedAt.IsZero()) {
+			r.Status = "locked"
+			r.EndReason = "Unlock this persistent grant after the server restart"
+		} else if active(r) {
 			r.Status = "revoked"
 			r.EndedAt = time.Now()
 			r.EndReason = "Server restarted"
@@ -132,7 +148,11 @@ func (s *Server) Close() error {
 	s.closed = true
 	for _, r := range s.state.Requests {
 		if active(r) {
-			s.endLocked(r, "revoked", "Server stopped")
+			if r.Mode == "persistent" && (r.Status == "active" || r.Status == "locked" || r.Status == "pending" && !r.LastUsedAt.IsZero()) {
+				s.endLocked(r, "locked", "Server stopped; unlock to resume")
+			} else {
+				s.endLocked(r, "revoked", "Server stopped")
+			}
 		}
 	}
 	e := s.store.Save(&s.state)
@@ -156,7 +176,10 @@ func (s *Server) RunJanitor(ctx context.Context) {
 			changed := false
 			now := time.Now()
 			for _, r := range s.state.Requests {
-				if (r.Status == "active" && !now.Before(r.ExpiresAt)) || (r.Status == "pending" && !now.Before(r.PendingUntil)) {
+				if idleExpired(r, now) {
+					s.endLocked(r, "locked", "Inactivity timeout; the next connection requests approval")
+					changed = true
+				} else if expired(r, now) {
 					s.endLocked(r, "expired", "Time limit reached")
 					changed = true
 				}
@@ -217,9 +240,12 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/requests/{id}/approve/finish", s.owner(s.approveFinish))
 	m.HandleFunc("POST /api/requests/{id}/revoke", s.owner(s.ownerRevoke))
 	m.HandleFunc("POST /v1/requests", s.requestCreate)
+	m.HandleFunc("GET /v1/recipient", s.ageRecipient)
+	m.HandleFunc("POST /v1/grants/{id}/connect", s.grantConnect)
 	m.HandleFunc("POST /v1/revoke", s.clientRevoke)
 	m.HandleFunc("GET /v1/requests/{id}", s.requestStatus)
 	m.HandleFunc("POST /v1/requests/{id}/agent", s.agentMessage)
+	m.HandleFunc("POST /v1/requests/{id}/age", s.ageDecrypt)
 	m.HandleFunc("POST /v1/requests/{id}/revoke", s.capabilityRevoke)
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, 200, map[string]any{"ok": true, "version": s.config.Version})
@@ -249,6 +275,15 @@ func (s *Server) Handler() http.Handler {
 				fail(w, 403, "Origin check failed")
 				return
 			}
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/") {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				fail(w, 400, "Invalid request body")
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			r = r.WithContext(context.WithValue(r.Context(), bodyDigestKey{}, sha256.Sum256(body)))
 		}
 		m.ServeHTTP(w, r)
 	})
@@ -363,9 +398,50 @@ func (s *Server) leaseLocked(r *http.Request) (*Request, *liveRequest, bool) {
 	if q == nil || l == nil || !equalSecret(l.CapabilityHash, tokenHash(bearer(r))) {
 		return nil, nil, false
 	}
+	digest, ok := r.Context().Value(bodyDigestKey{}).([32]byte)
+	if !ok {
+		return nil, nil, false
+	}
+	nonce, valid := proof.Verify(r, digest, q.RequestKey)
+	if !valid {
+		return nil, nil, false
+	}
+	if l.Nonces == nil {
+		l.Nonces = map[string]time.Time{}
+	}
+	now := time.Now()
+	for n, expiry := range l.Nonces {
+		if now.After(expiry) {
+			delete(l.Nonces, n)
+		}
+	}
+	if _, seen := l.Nonces[nonce]; seen || len(l.Nonces) >= 4096 {
+		return nil, nil, false
+	}
+	l.Nonces[nonce] = now.Add(2 * proof.Window)
 	return q, l, true
 }
 func (s *Server) endLocked(r *Request, status, reason string) {
+	if r.Mode == "persistent" && !r.LastUsedAt.IsZero() && (status == "denied" || status == "expired") {
+		status = "locked"
+	}
+	r.Status = status
+	if r.Mode == "persistent" {
+		for _, child := range s.state.Requests {
+			if child.GrantID == r.ID && active(child) {
+				childStatus := "revoked"
+				if child.Status == "pending" {
+					childStatus = "denied"
+				}
+				s.endLocked(child, childStatus, reason)
+			}
+		}
+		if status != "locked" {
+			secrets := s.state.Grants[r.ID]
+			secrets.ConnectionHash = ""
+			s.state.Grants[r.ID] = secrets
+		}
+	}
 	if l := s.live[r.ID]; l != nil && l.Worker != nil {
 		l.Worker.Close()
 		l.Worker = nil
@@ -373,9 +449,27 @@ func (s *Server) endLocked(r *Request, status, reason string) {
 	r.Status = status
 	r.EndedAt = time.Now()
 	r.EndReason = reason
+	if r.GrantID != "" {
+		parent := s.state.Requests[r.GrantID]
+		if parent != nil && parent.Status == "pending" {
+			waiting := false
+			for _, child := range s.state.Requests {
+				if child.GrantID == parent.ID && child.Status == "pending" {
+					waiting = true
+					break
+				}
+			}
+			if !waiting {
+				s.endLocked(parent, "locked", "Waiting connection cancelled")
+			}
+		}
+	}
 }
 func (s *Server) checkExpiryLocked(r *Request) {
-	if r.Status == "active" && !time.Now().Before(r.ExpiresAt) || r.Status == "pending" && !time.Now().Before(r.PendingUntil) {
+	if idleExpired(r, time.Now()) {
+		s.endLocked(r, "locked", "Inactivity timeout; the next connection requests approval")
+		_ = s.persistLocked()
+	} else if expired(r, time.Now()) {
 		s.endLocked(r, "expired", "Time limit reached")
 		_ = s.persistLocked()
 	}

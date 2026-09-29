@@ -49,7 +49,8 @@ async function until(fn, timeout = 15000) {
 }
 async function cli(args, options = {}) {
   return await new Promise((resolve, reject) => {
-    const p = spawn(exe, [args[0], "--config", config, ...args.slice(1)], {
+    const actual = args[0] === "grant" ? [args[0], args[1], "--config", config, ...args.slice(2)] : [args[0], "--config", options.config || config, ...args.slice(1)];
+    const p = spawn(exe, actual, {
       ...options,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -58,6 +59,7 @@ async function cli(args, options = {}) {
     p.stdout.on("data", (b) => (out += b));
     p.stderr.on("data", (b) => (err += b));
     p.on("error", reject);
+    p.stdin.on("error", e => { if (e.code !== "EPIPE") reject(e); });
     p.on("exit", (code) => resolve({ code, out, err }));
     if (options.input) p.stdin.write(options.input);
     p.stdin.end();
@@ -187,6 +189,11 @@ try {
     { input: pairing },
   );
   assert.equal(configured.code, 0, configured.err);
+  const document = "Synthetic age browser test document\n".repeat(5000);
+  const encrypted = await cli(["encrypt", "--armor"], {input: document});
+  assert.equal(encrypted.code, 0, encrypted.err);
+  assert.match(encrypted.out, /^-----BEGIN AGE ENCRYPTED FILE-----/);
+  assert.equal(await page.evaluate(async () => Object.keys((await (await fetch("/api/state")).json()).requests).length), 0);
   const oversized = await cli([
     "request", "--no-wait", "--session", "oversized-smoke",
     "--reason", "Verify the maximum lease is enforced",
@@ -429,13 +436,65 @@ try {
       .status,
     "revoked",
   );
+  // File headers alone travel to Sentinel; plaintext and body stay local.
+  const single = cli(["decrypt", "--reason", "Read this one generated browser document", "--timeout", "30s"], {input: encrypted.out});
+  await page.getByRole("button", {name: "Decrypt once", exact: true}).waitFor();
+  await page.getByRole("button", {name: "Decrypt once", exact: true}).click();
+  const singleResult = await single;
+  assert.equal(singleResult.code, 0, singleResult.err);
+  assert.equal(singleResult.out, document);
+  const singleState = await page.evaluate(async () => (await (await fetch("/api/state")).json()).requests);
+  const singleRequest = Object.values(singleState).find(q => q.mode === "age-once");
+  assert.equal(singleRequest.status, "completed");
+  assert.equal(singleRequest.socket, "");
+  assert.equal(singleRequest.durationSeconds, 0);
+  const ageLease = await cli(["request", "--no-wait", "--session", "age-smoke", "--reason", "Read generated documents with a scoped age lease", "--access", "age", "--duration", "60s"]);
+  assert.equal(ageLease.code,0,ageLease.err);
+  const ageWait = cli(["wait", "--session", "age-smoke", "--timeout", "30s"]);
+  await page.getByRole("button", {name: "Approve for 1 min", exact:true}).waitFor();
+  await page.getByRole("button", {name: "Approve for 1 min", exact:true}).click();
+  assert.equal((await ageWait).code,0);
+  const ageResult = await cli(["decrypt", "--session", "age-smoke"], {input: encrypted.out});
+  assert.equal(ageResult.code,0,ageResult.err);
+  assert.equal(ageResult.out,document);
+  assert.equal((await cli(["revoke", "--session", "age-smoke"])).code,0);
+  assert.notEqual((await cli(["decrypt", "--session", "age-smoke"], {input: encrypted.out})).code,0);
+
+  // CI clients need only a connection token, not a paired-client config or key.
+  const grant = await cli(["grant", "create", "--no-wait", "--session", "ci-smoke", "--reason", "Test GitHub ephemeral runner access", "--idle-timeout", "5s"]);
+  assert.equal(grant.code,0,grant.err);
+  const grantID = JSON.parse(grant.out).id;
+  await page.getByRole("button", {name: "Approve persistent access", exact:true}).waitFor();
+  await page.getByRole("button", {name: "Approve persistent access", exact:true}).click();
+  await until(async () => JSON.parse((await cli(["status", "--session", "ci-smoke"])).out).status === "active");
+  const exported = await cli(["grant", "export", "--session", "ci-smoke", "--token-stdout"]);
+  assert.equal(exported.code,0,exported.err);
+  const ciConfig = join(dir,"ci-a.json");
+  const connected = await cli(["connect", "--session", "ci-job-a", "--token-stdin", "--duration", "60s"], {input: exported.out, config: ciConfig});
+  assert.equal(connected.code,0,connected.err);
+  const ciSocket = connected.out.trim();
+  execFileSync("/usr/bin/ssh-add", ["-T", join(dir,"test.pub")], {env:{...process.env, SSH_AUTH_SOCK:ciSocket}});
+  await until(async () => JSON.parse((await cli(["status", "--session", "ci-smoke"])).out).status === "locked",15000);
+  const reconnected = cli(["connect", "--session", "ci-job-b", "--token-stdin", "--duration", "60s", "--timeout", "30s"], {input:exported.out,config:join(dir,"ci-b.json")});
+  await page.locator(`#request-${grantID}`).getByRole("button", {name:"Unlock grant",exact:true}).waitFor();
+  await page.locator(`#request-${grantID}`).getByRole("button", {name:"Unlock grant",exact:true}).click();
+  const resumed = await reconnected;
+  assert.equal(resumed.code,0,resumed.err);
+  assert.notEqual(resumed.out.trim(),ciSocket);
+  execFileSync("/usr/bin/ssh-add", ["-T", join(dir,"test.pub")], {env:{...process.env, SSH_AUTH_SOCK:resumed.out.trim()}});
+  await page.screenshot({path:"test-results/phone-persistent-grant.png",fullPage:true});
+  await page.locator(`#request-${grantID}`).getByRole("button", {name:"Revoke access",exact:true}).click();
+  const cannotReconnect = await cli(["connect", "--session", "ci-job-c", "--token-stdin"], {input:exported.out,config:join(dir,"ci-c.json")});
+  assert.notEqual(cannotReconnect.code,0);
+  assert.match(cannotReconnect.err,/Invalid connection token/);
+  await until(async()=>{try{await import("node:fs/promises").then(fs=>fs.stat(resumed.out.trim()));return false}catch(e){return e.code === "ENOENT"}},5000);
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
   await page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await page.getByRole("heading", { name: "Requests", exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: real WebAuthn PRF/largeBlob virtual authenticator, encrypted RSA paste, local Wasm validation, PWA approval, CLI submit/status/wait, ssh-add signatures, live phone revocation, rejection, expiry, wait timeout, automatic exec cleanup, ssh-config auto-request, responsive layouts.",
+    "PASS: unattended age encryption, scoped and one-shot decryption, persistent CI connection token, idle auto-lock, reapproval with unchanged token, grant revocation, real WebAuthn PRF/largeBlob virtual authenticator, encrypted RSA paste, local Wasm validation, PWA approval, CLI submit/status/wait, ssh-add signatures, live phone revocation, rejection, expiry, wait timeout, automatic exec cleanup, ssh-config auto-request, responsive layouts.",
   );
 } catch (e) {
   if (browser) {

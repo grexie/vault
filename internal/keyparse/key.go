@@ -11,14 +11,20 @@ import (
 )
 
 func Parse(data, password []byte) (ssh.Signer, error) {
-	if bytes.HasPrefix(bytes.TrimSpace(data), []byte(`{"v":1,`)) {
-		return parseCompact(data)
-	}
-	k, err := parseRaw(data, password)
+	k, err := ParseRaw(data, password)
 	if err != nil {
 		return nil, err
 	}
 	return ssh.NewSignerFromKey(k)
+}
+
+// ParseRaw is for the isolated worker, which needs private parameters for age.
+// Callers must never serialize or return the result outside the worker.
+func ParseRaw(data, password []byte) (any, error) {
+	if bytes.HasPrefix(bytes.TrimSpace(data), []byte(`{"v":1,`)) {
+		return parseCompact(data)
+	}
+	return parseRaw(data, password)
 }
 
 func parseRaw(data, password []byte) (any, error) {

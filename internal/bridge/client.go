@@ -3,6 +3,7 @@ package bridge
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/grexie/remote-ssh-agent/internal/app"
+	"github.com/grexie/remote-ssh-agent/internal/proof"
 )
 
 type Config struct {
@@ -22,7 +24,8 @@ type Config struct {
 }
 type Client struct {
 	Config
-	HTTP *http.Client
+	HTTP       *http.Client
+	SigningKey ed25519.PrivateKey
 }
 
 func DefaultConfigPath() string {
@@ -79,11 +82,13 @@ func New(c Config) *Client {
 }
 func (c *Client) Call(ctx context.Context, method, path, token string, in, out any) error {
 	var body io.Reader
+	var encoded []byte
 	if in != nil {
 		b, e := json.Marshal(in)
 		if e != nil {
 			return e
 		}
+		encoded = b
 		body = bytes.NewReader(b)
 	}
 	r, e := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(c.Server, "/")+path, body)
@@ -92,6 +97,11 @@ func (c *Client) Call(ctx context.Context, method, path, token string, in, out a
 	}
 	r.Header.Set("Authorization", "Bearer "+token)
 	r.Header.Set("Content-Type", "application/json")
+	if len(c.SigningKey) == ed25519.PrivateKeySize {
+		if e = proof.Sign(r, encoded, c.SigningKey); e != nil {
+			return e
+		}
+	}
 	res, e := c.HTTP.Do(r)
 	if e != nil {
 		return e
@@ -115,4 +125,10 @@ func (c *Client) Call(ctx context.Context, method, path, token string, in, out a
 		return json.Unmarshal(b, out)
 	}
 	return nil
+}
+
+func leaseClient(l Lease) *Client {
+	c := New(l.Config)
+	c.SigningKey = ed25519.PrivateKey(l.SigningKey)
+	return c
 }

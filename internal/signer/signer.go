@@ -7,7 +7,9 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -19,6 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"filippo.io/age"
+	"filippo.io/age/agessh"
+	"github.com/grexie/remote-ssh-agent/internal/access"
 	"github.com/grexie/remote-ssh-agent/internal/keyparse"
 	"github.com/grexie/remote-ssh-agent/internal/limits"
 	"golang.org/x/crypto/hkdf"
@@ -36,19 +41,27 @@ type Envelope struct {
 }
 
 type Message struct {
-	Action    string               `json:"action"`
-	Envelope  *Envelope            `json:"envelope,omitempty"`
-	ExpiresAt time.Time            `json:"expiresAt,omitempty"`
-	Data      []byte               `json:"data,omitempty"`
-	Key       []byte               `json:"key,omitempty"`
-	Flags     agent.SignatureFlags `json:"flags,omitempty"`
+	Action      string               `json:"action"`
+	IdleSeconds int                  `json:"idleSeconds,omitempty"`
+	Access      string               `json:"access,omitempty"`
+	Envelope    *Envelope            `json:"envelope,omitempty"`
+	ExpiresAt   time.Time            `json:"expiresAt,omitempty"`
+	Data        []byte               `json:"data,omitempty"`
+	Key         []byte               `json:"key,omitempty"`
+	Flags       agent.SignatureFlags `json:"flags,omitempty"`
 }
 
 type Reply struct {
 	PublicKey []byte         `json:"publicKey,omitempty"`
+	FileKey   []byte         `json:"fileKey,omitempty"`
 	Signature *ssh.Signature `json:"signature,omitempty"`
 	Error     string         `json:"error,omitempty"`
 }
+
+// OperationError is a rejected operation from a live worker, not worker failure.
+type OperationError struct{ Message string }
+
+func (e *OperationError) Error() string { return e.Message }
 
 type Worker struct {
 	mu        sync.Mutex
@@ -97,7 +110,7 @@ func (w *Worker) read() (Reply, error) {
 		return r, err
 	}
 	if r.Error != "" {
-		return r, errors.New(r.Error)
+		return r, &OperationError{Message: r.Error}
 	}
 	return r, nil
 }
@@ -165,10 +178,15 @@ func decrypt(priv *ecdh.PrivateKey, e Envelope, aad []byte) ([]byte, error) {
 // Serve runs only in the hidden child-process command. EOF, hard deadline,
 // expiry, or the parent killing the process destroys the live signer.
 func Serve(id, fingerprint string, hardDeadline time.Time, in io.Reader, out io.Writer) error {
-	if time.Until(hardDeadline) <= 0 || time.Until(hardDeadline) > limits.MaxLeaseDuration+5*time.Minute {
+	persistent := hardDeadline.IsZero()
+	if !persistent && (time.Until(hardDeadline) <= 0 || time.Until(hardDeadline) > limits.MaxLeaseDuration+5*time.Minute) {
 		return errors.New("invalid signer deadline")
 	}
-	timer := time.AfterFunc(time.Until(hardDeadline), func() { os.Exit(0) })
+	initialTTL := time.Until(hardDeadline)
+	if persistent {
+		initialTTL = 3 * time.Minute
+	}
+	timer := time.AfterFunc(initialTTL, func() { os.Exit(0) })
 	defer timer.Stop()
 	priv, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
@@ -181,7 +199,10 @@ func Serve(id, fingerprint string, hardDeadline time.Time, in io.Reader, out io.
 	scan := bufio.NewScanner(in)
 	scan.Buffer(make([]byte, 4096), MaxMessage)
 	var key ssh.Signer
+	var ageKey age.Identity
+	var allowed string
 	var expires time.Time
+	var idle time.Duration
 	for scan.Scan() {
 		var m Message
 		if err := json.Unmarshal(scan.Bytes(), &m); err != nil {
@@ -190,7 +211,7 @@ func Serve(id, fingerprint string, hardDeadline time.Time, in io.Reader, out io.
 		var r Reply
 		switch {
 		case m.Action == "unlock" && key == nil && m.Envelope != nil:
-			if m.ExpiresAt.After(hardDeadline) || !m.ExpiresAt.After(time.Now()) {
+			if persistent && !m.ExpiresAt.IsZero() || !persistent && (m.ExpiresAt.After(hardDeadline) || !m.ExpiresAt.After(time.Now())) {
 				return errors.New("invalid expiry")
 			}
 			plain, err := decrypt(priv, *m.Envelope, Context(id, fingerprint))
@@ -208,7 +229,11 @@ func Serve(id, fingerprint string, hardDeadline time.Time, in io.Reader, out io.
 			}
 			pem := []byte(payload.Key)
 			pass := []byte(payload.Passphrase)
-			key, err = keyparse.Parse(pem, pass)
+			raw, parseErr := keyparse.ParseRaw(pem, pass)
+			err = parseErr
+			if err == nil {
+				key, err = ssh.NewSignerFromKey(raw)
+			}
 			clear(pem)
 			clear(pass)
 			payload.Key = ""
@@ -220,12 +245,43 @@ func Serve(id, fingerprint string, hardDeadline time.Time, in io.Reader, out io.
 			if ssh.FingerprintSHA256(key.PublicKey()) != fingerprint {
 				return errors.New("SSH key fingerprint mismatch")
 			}
+			allowed, err = access.Normalize(m.Access)
+			if err != nil {
+				return err
+			}
+			if access.AllowsAge(allowed) {
+				switch k := raw.(type) {
+				case ed25519.PrivateKey:
+					ageKey, err = agessh.NewEd25519Identity(k)
+				case *ed25519.PrivateKey:
+					ageKey, err = agessh.NewEd25519Identity(*k)
+				case *rsa.PrivateKey:
+					ageKey, err = agessh.NewRSAIdentity(k)
+				default:
+					return errors.New("age requires an RSA or Ed25519 SSH key")
+				}
+				if err != nil {
+					return errors.New("SSH key cannot be used with age")
+				}
+			}
 			expires = m.ExpiresAt
-			timer.Reset(time.Until(expires))
+			if persistent {
+				idle = time.Duration(m.IdleSeconds) * time.Second
+				if idle < time.Second || idle > limits.MaxIdleDuration {
+					return errors.New("invalid inactivity timeout")
+				}
+				expires = time.Now().Add(idle)
+				timer.Reset(idle)
+			} else {
+				timer.Reset(time.Until(expires))
+			}
 			r.PublicKey = key.PublicKey().Marshal()
-		case key != nil && time.Now().Before(expires) && m.Action == "list":
+		case key != nil && persistent && time.Now().Before(expires) && m.Action == "touch":
+			expires = time.Now().Add(idle)
+			timer.Reset(idle)
+		case key != nil && time.Now().Before(expires) && access.AllowsSSH(allowed) && m.Action == "list":
 			r.PublicKey = key.PublicKey().Marshal()
-		case key != nil && time.Now().Before(expires) && m.Action == "sign":
+		case key != nil && time.Now().Before(expires) && access.AllowsSSH(allowed) && m.Action == "sign":
 			if len(m.Data) > 32768 || len(m.Data) == 0 || base64.StdEncoding.EncodeToString(m.Key) != base64.StdEncoding.EncodeToString(key.PublicKey().Marshal()) {
 				return errors.New("invalid signing request")
 			}
@@ -255,12 +311,27 @@ func Serve(id, fingerprint string, hardDeadline time.Time, in io.Reader, out io.
 				return errors.New("signing failed")
 			}
 			r.Signature = sig
+			if persistent {
+				expires = time.Now().Add(idle)
+				timer.Reset(idle)
+			}
+		case ageKey != nil && time.Now().Before(expires) && access.AllowsAge(allowed) && m.Action == "age-decrypt":
+			if len(m.Data) == 0 || len(m.Data) > limits.MaxAgeHeader {
+				r.Error = "invalid age header"
+				break
+			}
+			r.FileKey, err = age.DecryptHeader(m.Data, ageKey)
+			if err != nil {
+				r.Error = "age header is invalid or encrypted to a different key"
+			}
 		default:
 			r.Error = "signer locked"
 		}
 		if err := enc.Encode(r); err != nil {
+			clear(r.FileKey)
 			return err
 		}
+		clear(r.FileKey)
 	}
 	return scan.Err()
 }

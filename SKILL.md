@@ -1,6 +1,6 @@
 ---
 name: remote-ssh-agent
-description: Request temporary SSH access through Remote SSH Agent, wait for phone approval, use its dedicated SSH_AUTH_SOCK, and revoke access when an authorized SSH task ends. Use when this service is configured for the user's SSH access.
+description: Use Remote SSH Agent for approved SSH access, age document encryption and decryption, or persistent CI grants when the user has configured this service.
 ---
 
 # Remote SSH Agent
@@ -72,3 +72,23 @@ remote-ssh-agent revoke --session codex-inspect-api-20260929
 Revoke on task completion, cancellation, or abandonment, even if time remains. If the server cannot be reached, report that revocation could not be delivered; the grant still has its original deadline. Do not claim revocation succeeded on a failed command.
 
 Revocation prevents new signatures and closes the request's agent socket. It does not terminate an already-authenticated SSH connection or reverse commands already executed. Do not enable agent forwarding unless explicitly required for the task.
+
+## Documents
+
+`encrypt` uses public recipients and must run unattended: no lease, justification, or notification. Use the saved public key by default, or explicit `-r PUBLIC_RECIPIENT` / `-R RECIPIENT_FILE` for offline operation. Never load private key files as a fallback.
+
+```sh
+remote-ssh-agent encrypt -o report.age report.txt
+remote-ssh-agent decrypt --reason 'Read the encrypted report for the requested investigation' \
+  -o report.decrypted.txt report.age
+```
+
+One-shot `decrypt --reason` is the default approval path: one document, no reusable lease/socket. For repeated authorized decryption, request `--access age` then `decrypt --session NAME`; revoke that lease afterward. Combined `--access ssh,age` needs explicit approval. Existing SSH leases cannot decrypt. RSA/Ed25519 SSH recipients are supported for decryption; encrypted documents must match the saved key. Read [README.md](README.md#age-documents-and-stdin) for streaming and recipient details. Never log plaintext unless the user requested its contents.
+
+## Persistent CI access
+
+Use only when the user asks to configure ongoing access. Read [README.md](README.md#persistent-grants-for-github-actions) and [the workflow example](examples/github-actions.yml) for setup. Create a grant with a clear workflow justification and `--idle-timeout 30d` (the default), then wait for phone approval. Export to the specified repository with `grant export --session NAME --github-repo OWNER/REPO`; this pipes the connection token directly to `gh secret set`. Do not print or place tokens in arguments, logs, commits, or memory. Scope Tailscale OIDC trust and GitHub environment protections to the intended workflow.
+
+The runner uses `connect --token-stdin --config NEW_PATH --session JOB --duration 30m -- COMMAND`. Each job gets a local socket, capability, and proof key. Command completion revokes that job only. The persistent grant belongs to the user and is not revoked after ordinary jobs; revoke it when the user ends that ongoing authorization. Inactivity and restarts lock the key while retaining the token. The next `connect` requests approval and waits; do not bypass or automatically retry rejection/timeout. Status polling does not keep the key unlocked.
+
+Sentinel uses private pipes to its signer and HTTPS to clients, with no server-side SSH-agent socket for remote unlocks. Only the requesting machine creates a socket. Same-user processes and root can use local sockets; software proof keys are not hardware attestation. The reusable CI connection token intentionally permits future authorized runners, so keep it in GitHub Secrets.

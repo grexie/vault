@@ -143,6 +143,7 @@ func (s *Server) keyBegin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name        string `json:"name"`
 		Fingerprint string `json:"fingerprint"`
+		PublicKey   string `json:"publicKey"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -174,7 +175,11 @@ func (s *Server) keyBegin(w http.ResponseWriter, r *http.Request) {
 		s.errorInternal(w, err)
 		return
 	}
-	id := s.addCeremonyLocked(ceremony{Kind: "key-" + op, Session: session, Browser: s.browser(r), KeyName: in.Name, Fingerprint: in.Fingerprint})
+	if in.PublicKey != "" && !validPublicKey(in.PublicKey, in.Fingerprint) {
+		fail(w, 400, "Public key must match the saved fingerprint")
+		return
+	}
+	id := s.addCeremonyLocked(ceremony{Kind: "key-" + op, Session: session, Browser: s.browser(r), KeyName: in.Name, Fingerprint: in.Fingerprint, PublicKey: in.PublicKey})
 	jsonReply(w, 200, map[string]any{"ceremony": id, "options": opts, "salt": s.state.Owner.Salt})
 }
 func (s *Server) keyFinish(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +207,7 @@ func (s *Server) keyFinish(w http.ResponseWriter, r *http.Request) {
 		}
 		s.state.Owner.KeyName = c.KeyName
 		s.state.Owner.Fingerprint = c.Fingerprint
+		s.state.Owner.PublicKey = c.PublicKey
 		if err = s.persistLocked(); err != nil {
 			s.errorInternal(w, err)
 			return

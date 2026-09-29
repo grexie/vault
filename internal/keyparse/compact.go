@@ -8,8 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
-
-	"golang.org/x/crypto/ssh"
 )
 
 // compactKey stores standard private parameters without redundant public and
@@ -58,7 +56,7 @@ func Compact(data, password []byte) (string, error) {
 	return string(b), e
 }
 
-func parseCompact(data []byte) (ssh.Signer, error) {
+func parseCompact(data []byte) (any, error) {
 	if len(data) > 1800 {
 		return nil, errors.New("compact key is too large")
 	}
@@ -99,12 +97,12 @@ func parseCompact(data []byte) (ssh.Signer, error) {
 			return nil, e
 		}
 		key.Precompute()
-		return ssh.NewSignerFromKey(key)
+		return key, nil
 	case "ed25519":
 		if len(v.Secret) != ed25519.SeedSize {
 			return nil, errors.New("invalid Ed25519 seed")
 		}
-		return ssh.NewSignerFromKey(ed25519.NewKeyFromSeed(v.Secret))
+		return ed25519.NewKeyFromSeed(v.Secret), nil
 	case "ecdsa":
 		var curve elliptic.Curve
 		switch v.Curve {
@@ -122,7 +120,7 @@ func parseCompact(data []byte) (ssh.Signer, error) {
 			return nil, errors.New("invalid ECDSA scalar")
 		}
 		x, y := curve.ScalarBaseMult(v.Secret)
-		return ssh.NewSignerFromKey(&ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: curve, X: x, Y: y}, D: d})
+		return &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: curve, X: x, Y: y}, D: d}, nil
 	default:
 		return nil, errors.New("unsupported compact key algorithm")
 	}

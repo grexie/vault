@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/grexie/remote-ssh-agent/internal/access"
 	"github.com/grexie/remote-ssh-agent/internal/app"
 	"github.com/grexie/remote-ssh-agent/internal/bridge"
 	"github.com/grexie/remote-ssh-agent/internal/limits"
@@ -57,6 +58,12 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	case "serve":
 		return serve(ctx, args[1:])
+	case "encrypt", "decrypt":
+		return cryptCommand(ctx, args[0], args[1:])
+	case "grant":
+		return grantCommand(ctx, args[1:])
+	case "connect":
+		return connectCommand(ctx, args[1:])
 	case "configure":
 		f := flags("configure")
 		server := f.String("server", "", "HTTPS URL of the phone app")
@@ -86,6 +93,7 @@ func run(ctx context.Context, args []string) error {
 		session := f.String("session", "", "session name (required)")
 		reason := f.String("reason", "", "justification shown on the phone (required)")
 		duration := f.Duration("duration", 0, "grant duration, up to 48h (required)")
+		accessFlag := f.String("access", access.SSH, "approved operations: ssh, age, or ssh,age")
 		host := f.String("host", "", "SSH config alias")
 		hostname := f.String("hostname", "", "actual SSH hostname (optional)")
 		if e := f.Parse(args[1:]); e != nil {
@@ -126,6 +134,9 @@ func run(ctx context.Context, args []string) error {
 			return errors.New("--reason (8–1000 characters) and --duration (1s–48h) are required")
 		}
 		if args[0] == "ssh-config" {
+			if *accessFlag != access.SSH {
+				return errors.New("ssh-config requires --access ssh; request combined access explicitly")
+			}
 			return sshConfig(c, *config, *host, *hostname, *session, *reason, *duration)
 		}
 		if *noWait && args[0] != "request" {
@@ -136,7 +147,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		waitCtx, cancel := context.WithTimeout(ctx, *waitTimeout)
 		defer cancel()
-		sock, e := bridge.Request(waitCtx, c, *session, *reason, *duration, args[0] == "ensure", *noWait, func(m string) { fmt.Fprintln(os.Stderr, m) })
+		sock, e := bridge.Request(waitCtx, c, *session, *reason, *duration, *accessFlag, args[0] == "ensure", *noWait, func(m string) { fmt.Fprintln(os.Stderr, m) })
 		if e != nil {
 			return e
 		}
@@ -270,20 +281,30 @@ func sshConfig(c bridge.Config, config, host, hostname, session, reason string, 
 func usage() {
 	fmt.Print(`Remote SSH Agent — one Go binary for phone approval and SSH sockets.
 
+  grant       create/export a phone-approved persistent SSH grant
+  connect     Create a local socket using a persistent connection token
   serve       Host the embedded PWA and BoltDB metadata
   configure   Pair this CLI using --server URL --token-stdin
   request     --session NAME --reason TEXT --duration 15m
+              [--access ssh|age|ssh,age] (default: ssh)
   ensure      Reuse a matching grant, or request approval
   status      --session NAME (JSON; safe for polling)
   wait        --session NAME [--timeout 5m]
   revoke      --session NAME
   exec        --session NAME --reason TEXT --duration 15m -- COMMAND ARGS...
   ssh-config  --host ALIAS --session NAME --reason TEXT --duration 15m
+  encrypt     [--recipient PUBLIC_KEY | --recipients-file PATH] [--armor] [-o OUTPUT] [INPUT]
+              Defaults to the saved public recipient; never requests access.
+  decrypt     (--reason TEXT | --session NAME) [-o OUTPUT] [INPUT]
+              --reason approves this document once, without a reusable lease.
+              --session uses an existing lease approved for age decryption.
   version
 
 request --no-wait returns a pending request as JSON for later status/wait.
 request/ensure print only the dedicated SSH_AUTH_SOCK path to stdout.
 exec supplies SSH_AUTH_SOCK to its command and revokes when the command exits.
-Every new grant needs an explicit justification, duration, and phone approval.
+Every new grant needs a justification and phone approval.
+Timed leases require --duration; persistent grants use --idle-timeout (default 30d).
+Encryption uses public keys and never requests approval.
 `)
 }

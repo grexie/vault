@@ -1,0 +1,75 @@
+# Copy to your deployment repository and configure the documented variables and secrets.
+# Pin action versions and REMOTE_SSH_AGENT_REF to reviewed commit SHAs.
+name: Approved SSH deployment
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out the reviewed agent source
+        uses: actions/checkout@v4
+        with:
+          repository: grexie/remote-ssh-agent
+          ref: ${{ vars.REMOTE_SSH_AGENT_REF }}
+          path: .remote-ssh-agent
+          persist-credentials: false
+          # For a private agent repository, supply a separate contents:read token.
+          # token: ${{ secrets.REMOTE_SSH_SOURCE_READ_TOKEN }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.8'
+      - name: Build the self-contained CLI
+        run: |
+          test -n "$AGENT_REF"
+          make -C .remote-ssh-agent build
+          echo "$GITHUB_WORKSPACE/.remote-ssh-agent/bin" >> "$GITHUB_PATH"
+        env:
+          AGENT_REF: ${{ vars.REMOTE_SSH_AGENT_REF }}
+      - name: Join the tailnet using OIDC
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ vars.TS_CLIENT_ID }}
+          audience: ${{ vars.TS_AUDIENCE }}
+          tags: tag:ci
+          ping: ${{ vars.REMOTE_SSH_AGENT_HOST }}
+      - name: Install trusted SSH host keys
+        env:
+          KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          test -n "$KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Connect and run the authorized command
+        env:
+          REMOTE_SSH_CONNECTION: ${{ secrets.REMOTE_SSH_CONNECTION }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          test -n "$REMOTE_SSH_CONNECTION"
+          test -n "$DEPLOY_HOST"
+          printf '%s' "$REMOTE_SSH_CONNECTION" | remote-ssh-agent connect \
+            --token-stdin --config "$RUNNER_TEMP/remote-ssh.json" \
+            --session "deploy-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --duration 30m --timeout 5m \
+            -- sh -c 'ssh -F /dev/null -o IdentityAgent="$SSH_AUTH_SOCK" \
+              -o IdentityFile=none -o IdentitiesOnly=no -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes -o ForwardAgent=no \
+              -o ControlMaster=no -o ControlPath=none "$DEPLOY_HOST" true'
+          # Replace `true` above with the reviewed deployment command.
+      - name: Close this job connection
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/remote-ssh.json"; then
+            .remote-ssh-agent/bin/remote-ssh-agent revoke \
+              --config "$RUNNER_TEMP/remote-ssh.json" \
+              --session "deploy-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          fi
