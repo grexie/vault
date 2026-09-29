@@ -17,6 +17,26 @@ import (
 	"github.com/grexie/remote-ssh-agent/internal/app"
 )
 
+// IsManagedSocket chooses the inherited IdentityAgent before ensure validates
+// it. Keep selection local: two independent network checks could disagree and
+// accidentally select a host alias after ensure verified a task socket.
+// This is recognition only, never authorization.
+func IsManagedSocket(socket string) (bool, error) {
+	if socket == "" {
+		return false, nil
+	}
+	d, e := RuntimeDir()
+	if e != nil {
+		return false, e
+	}
+	realDir, e := filepath.EvalSymlinks(d)
+	if e != nil {
+		return false, e
+	}
+	p := filepath.Clean(socket)
+	return strings.HasPrefix(p, d+string(os.PathSeparator)) || strings.HasPrefix(p, realDir+string(os.PathSeparator)), nil
+}
+
 // InheritedSocket recognizes only this user's Remote SSH Agent sockets, then
 // verifies the lease with its client proof. Ordinary SSH agents are ignored.
 // Once a managed socket is recognized, any failure is terminal: it must not

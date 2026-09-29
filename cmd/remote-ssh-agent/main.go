@@ -74,11 +74,10 @@ func run(ctx context.Context, args []string) error {
 		if e := f.Parse(args[1:]); e != nil {
 			return e
 		}
-		c, e := bridge.Load(*config)
-		if e != nil {
+		if _, e := bridge.Load(*config); e != nil {
 			return errNoInheritedSocket
 		}
-		found, e := bridge.InheritedSocket(ctx, c, os.Getenv("SSH_AUTH_SOCK"))
+		found, e := bridge.IsManagedSocket(os.Getenv("SSH_AUTH_SOCK"))
 		if !found || e != nil {
 			return errNoInheritedSocket
 		}

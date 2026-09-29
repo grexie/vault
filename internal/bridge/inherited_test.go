@@ -95,6 +95,9 @@ func TestInheritedSocketRequiresLiveSSHLease(t *testing.T) {
 		t.Fatal("missing managed socket allowed fallback")
 	}
 	server.Close()
+	if found, err := IsManagedSocket(socket); !found || err != nil {
+		t.Fatal("network failure changed which socket the config selects")
+	}
 	if found, err := InheritedSocket(context.Background(), c, socket); !found || err == nil {
 		t.Fatal("unavailable server allowed fallback")
 	}
