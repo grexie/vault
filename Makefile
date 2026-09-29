@@ -6,7 +6,7 @@ build: assets
 	go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o bin/remote-ssh-agent ./cmd/remote-ssh-agent
 
 assets:
-	GOOS=js GOARCH=wasm go build -trimpath -ldflags '-s -w' -o web/static/key-parser.wasm ./cmd/key-parser
+	GOOS=js GOARCH=wasm go build -buildvcs=false -trimpath -ldflags '-s -w' -o web/static/key-parser.wasm ./cmd/key-parser
 	install -m 0644 "$$(go env GOROOT)/lib/wasm/wasm_exec.js" web/static/wasm_exec.js
 	go run cmd/assets/main.go
 
