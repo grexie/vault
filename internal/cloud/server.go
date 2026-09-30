@@ -40,6 +40,7 @@ type Server struct {
 	rates         map[string]rate
 	proxies       []netip.Prefix
 	admission     sync.Mutex
+	vaultMutation sync.Mutex // Serialize encrypted vault changes with approvals in this single-replica service.
 	notifications chan struct{}
 	notified      map[string]time.Time
 }
@@ -288,8 +289,9 @@ func (s *Server) getVault(w http.ResponseWriter, r *http.Request, session Sessio
 }
 func (s *Server) putVault(w http.ResponseWriter, r *http.Request, session Session, u User) {
 	var in struct {
-		Version int64       `json:"version"`
-		Vault   VaultRecord `json:"vault"`
+		Version          int64                `json:"version"`
+		Vault            VaultRecord          `json:"vault"`
+		RevokeIdentities []identityRevocation `json:"revokeIdentities,omitempty"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -306,6 +308,19 @@ func (s *Server) putVault(w http.ResponseWriter, r *http.Request, session Sessio
 	}
 	if !validCredential {
 		fail(w, 400, "Vault must be bound to an enrolled passkey")
+		return
+	}
+	if !validRevocations(in.RevokeIdentities) {
+		fail(w, 400, "Invalid identity deletion")
+		return
+	}
+	s.vaultMutation.Lock()
+	defer s.vaultMutation.Unlock()
+	if !s.requireVaultVersion(w, r, u, in.Version) {
+		return
+	}
+	if err := s.revokeIdentityRequests(r, u, in.RevokeIdentities); err != nil {
+		fail(w, 503, "Could not revoke identity access; the identity has not been deleted. Try again.")
 		return
 	}
 	err := s.store.Put(r.Context(), "vaults", u.key(), in.Version, in.Vault, nil)

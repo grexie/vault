@@ -20,13 +20,18 @@ type securityReviewFixture struct {
 	store            *cloudstore.Store
 	user             User
 	cookie           string
+	ownerPrivate     []byte
 	requester, agent *device.Client
 }
 
-func newSecurityReviewFixture(t *testing.T) *securityReviewFixture {
+func newSecurityReviewFixture(t *testing.T, backends ...cloudstore.Backend) *securityReviewFixture {
 	t.Helper()
 	ctx := context.Background()
-	store, err := cloudstore.New(cloudstore.NewMemory(), random(32))
+	var backend cloudstore.Backend = cloudstore.NewMemory()
+	if len(backends) > 0 {
+		backend = backends[0]
+	}
+	store, err := cloudstore.New(backend, random(32))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +50,7 @@ func newSecurityReviewFixture(t *testing.T) *securityReviewFixture {
 		t.Fatal(err)
 	}
 	owner, _ := vaultwire.NewKey()
+	f.ownerPrivate = owner.Bytes()
 	ownerBox, _ := vaultwire.NewKey()
 	for i := 0; i < 2; i++ {
 		cfg, err := device.NewConfig(server.URL, "Fixture")
@@ -200,6 +206,26 @@ func TestSecurityReviewRevokingEitherParticipantStopsRemoteAccess(t *testing.T) 
 			if state, err := f.agent.Status(context.Background(), p.Request.ID); err != nil || state.Status != "approved" {
 				t.Fatal("fixture not active", err)
 			}
+			listRequests := func() []vaultwire.RequestState {
+				t.Helper()
+				r := httptest.NewRequest(http.MethodGet, "https://vault.example/api/v1/requests", nil)
+				r.AddCookie(&http.Cookie{Name: f.s.cookie, Value: f.cookie})
+				w := httptest.NewRecorder()
+				f.s.Handler().ServeHTTP(w, r)
+				var out struct {
+					Requests []vaultwire.RequestState `json:"requests"`
+				}
+				if w.Code != http.StatusOK {
+					t.Fatal(w.Code, w.Body.String())
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+					t.Fatal(err)
+				}
+				return out.Requests
+			}
+			if got := listRequests(); len(got) != 2 {
+				t.Fatalf("request list omitted pending or active fixture: %d", len(got))
+			}
 			revoked, survivor := f.requester, f.agent
 			if revokeAgent {
 				revoked, survivor = f.agent, f.requester
@@ -212,6 +238,9 @@ func TestSecurityReviewRevokingEitherParticipantStopsRemoteAccess(t *testing.T) 
 			}
 			if w := f.approve(t, waiting); w.Code == 200 {
 				t.Fatal("request could be approved after participant revocation")
+			}
+			if got := listRequests(); len(got) != 0 {
+				t.Fatalf("request list advertised revoked participant's access: %d", len(got))
 			}
 			if !revokeAgent {
 				var inbox struct {

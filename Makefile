@@ -14,7 +14,7 @@ assets:
 
 test: build
 	go test -race ./...
-	node --test web/crypto.test.js
+	node --test web/crypto.test.js web/vault/sw.test.js web/vault/identity-names.test.js
 
 check:
 	go vet ./...
@@ -23,6 +23,8 @@ check:
 	node --check web/vault/app.js
 	node --check web/vault/crypto.js
 	node --check web/vault/sourcify.js
+	node --check web/vault/sw.js
+	node --check web/vault/identity-names.js
 
 clean:
 	rm -rf bin

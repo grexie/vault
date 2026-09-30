@@ -1,12 +1,13 @@
 import {optionsFromJSON, publicCredential} from "/passkey.js";
 import {b64, unb64, b64url, bytes, seal, open, prfKey, newRoot, sign, envelope, verify, digest, openEnvelope} from "/crypto.js";
 import {verifiedABIs, downloadABI} from "/sourcify.js";
+import {restoredIdentityName} from "/identity-names.js";
 const $ = (id) => document.getElementById(id);
 let session, root, vault, wrappedKey, credentialID, version = 0, mode = "generate", restoring = false, backupFile, restorePreview;
 let epoch=0;
 let worker, nextID=0;const pending=new Map();
 let toastTimer;
-function toast(message,error=false){$("toast").textContent=message;$("toast").classList.toggle("error",error);$("toast").hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$("toast").hidden=true,error?12000:5000);}
+function toast(message,error=false){const toast=$("toast"),dialog=[...document.querySelectorAll("dialog[open]")].at(-1);(dialog||document.body).append(toast);toast.textContent=message;toast.classList.toggle("error",error);toast.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.hidden=true,error?12000:5000);}
 async function action(button,fn){if(button?.disabled)return; if(button)button.disabled=true;try{return await fn();}catch(e){toast(e.message||"Something went wrong. Please try again.",true);}finally{if(button)button.disabled=false;}}
 async function api(path,body,method=body===undefined?"GET":"POST"){
  const generation=epoch;
@@ -25,7 +26,7 @@ function lock(){
  if(worker){worker.terminate();worker=null;}
  for(const waiter of pending.values())waiter.reject(new Error("Vault locked; operation cancelled"));pending.clear();
  root=null;vault=null;session=null;wrappedKey=null;credentialID=null;version=0;
- backupFile=null;restorePreview=null;selectedRequest=null;providers=null;
+ backupFile=null;restorePreview=null;selectedRequest=null;providers=null;managementAction=null;
  for(const form of document.querySelectorAll("form"))form.reset();
  for(const input of document.querySelectorAll("input,textarea"))if(input.type!=="button"&&input.type!=="submit")input.value="";
  for(const dialog of document.querySelectorAll("dialog[open]"))dialog.close();
@@ -58,12 +59,12 @@ async function publishCatalog(){
  const signed=await sign(root,"catalog",{ownerId:session.userId,identities,updatedAt:new Date().toISOString()});
  for(const device of vault.devices){const box=await envelope(device.boxPublic,`catalog:${device.id}`,signed);try{await api("/catalog",{deviceId:device.id,box});}catch(e){toast("Saved. Public identity sync needs another try.",true);}}
 }
-async function save(next){
+async function save(next,revokeIdentities=[]){
  const generation=epoch;
  if(!root||!session)throw new Error("Vault is locked");
  const key=unb64(root.key);let data;try{data=await seal(key,`grexie-vault/data/v1:${session.userId}:${version+1}`,next);}finally{key.fill(0);}
  if(generation!==epoch)throw new Error("Vault locked; save cancelled");
- const result=await api("/vault",{version,vault:{wrappedKey,data,credential:credentialID}},"PUT");
+ const result=await api("/vault",{version,vault:{wrappedKey,data,credential:credentialID},revokeIdentities},"PUT");
  if(generation!==epoch)throw new Error("Vault locked; save cancelled");version=result.version;vault=next;show("vault-view");render();await publishCatalog();
 }
 async function unlockWith(credential){
@@ -91,21 +92,31 @@ $("register-form").onsubmit=(event)=>{event.preventDefault();action(event.submit
 });};
 $("unlock").onclick=()=>action($("unlock"),async()=>{const {credential}=await freshPasskey();await unlockWith(credential);});
 $("signout").onclick=()=>action($("signout"),async()=>{await api("/logout",{});if(session)localStorage.removeItem(cacheName());lock();if(worker){worker.terminate();worker=null;}});
-for(const button of document.querySelectorAll("[data-tab]"))button.onclick=()=>{for(const b of document.querySelectorAll("[data-tab]"))b.classList.toggle("selected",b===button);for(const tab of ["identities","requests","settings"])$(tab+"-panel").hidden=tab!==button.dataset.tab;if(button.dataset.tab==="requests")refreshRequests();};
+function selectTab(tab){if(!["identities","requests","settings"].includes(tab))return;const hash=tab==="requests"?"#requests":"";if(location.hash!==hash)history.replaceState(null,"",location.pathname+location.search+hash);for(const b of document.querySelectorAll("[data-tab]"))b.classList.toggle("selected",b.dataset.tab===tab);for(const name of ["identities","requests","settings"])$(name+"-panel").hidden=name!==tab;if(tab==="requests")refreshRequests();}
+for(const button of document.querySelectorAll("[data-tab]"))button.onclick=()=>selectTab(button.dataset.tab);
+window.addEventListener("hashchange",()=>selectTab(location.hash.slice(1)||"identities"));
+if("serviceWorker" in navigator)navigator.serviceWorker.addEventListener("message",event=>{if(event.data?.type==="show-requests")selectTab("requests");});
 for(const button of document.querySelectorAll("[data-close]"))button.onclick=()=>$(button.dataset.close).close();
 function render(){
  const list=$("identity-list");list.replaceChildren();$("identity-empty").hidden=!!vault.identities.length;
- for(const identity of vault.identities){const card=node("article",undefined,"identity-card"),glyph=node("div",identity.type==="ssh"?"⌘":identity.type==="bitcoin"?"₿":"◇","identity-glyph"),details=node("div",undefined,"identity-details"),title=node("h2",identity.name);title.append(node("span",identity.type+(identity.threshold?" · all owners":""),"badge"));details.append(title,node("p",identity.address||identity.publicKey));const copy=node("button","Copy","text-button");copy.onclick=()=>action(copy,async()=>{await navigator.clipboard.writeText(identity.type==="ssh"?identity.publicKey:identity.address||identity.publicKey);toast("Public identity copied");});card.append(glyph,details,copy);list.append(card);}
- $("device-list").replaceChildren(...vault.devices.map(d=>node("p",`${d.name} · ${d.role==="agent"?"Signing agent":"Requesting client"}`)));
+ for(const identity of vault.identities){const card=node("article",undefined,"identity-card"),glyph=node("div",identity.type==="ssh"?"⌘":identity.type==="bitcoin"?"₿":"◇","identity-glyph"),details=node("div",undefined,"identity-details"),title=node("h2",identity.name);title.append(node("span",identity.type+(identity.threshold?" · all owners":""),"badge"));details.append(title,node("p",identity.address||identity.publicKey));const actions=node("div",undefined,"identity-actions"),copy=node("button","Copy","text-button"),remove=node("button","Delete","text-button danger-text");copy.onclick=()=>action(copy,async()=>{await navigator.clipboard.writeText(identity.type==="ssh"?identity.publicKey:identity.address||identity.publicKey);toast("Public identity copied");});remove.setAttribute("aria-label",`Delete ${identity.name}`);remove.onclick=()=>confirmManagement("Delete identity?",identity.name,"Active access to this identity will be revoked. You will need the original key or an encrypted backup to restore it.","Delete identity",async()=>{await save({...vault,identities:vault.identities.filter(i=>i.id!==identity.id)},[{name:identity.name,type:identity.type,network:identity.network||""}]);return "Identity deleted and access revoked";});actions.append(copy,remove);card.append(glyph,details,actions);list.append(card);}
+ $("device-list").replaceChildren(...vault.devices.map(d=>{const row=node("div",undefined,"device-row"),details=node("div");details.append(node("h3",d.name),node("p",d.role==="agent"?"Signing agent":"Requesting client"));const remove=node("button","Unpair","text-button danger-text");remove.setAttribute("aria-label",`Unpair ${d.name}`);remove.onclick=()=>confirmManagement("Unpair device?",d.name,"New requests and active key access will be revoked. Existing SSH connections can remain open. Pair this device again to reconnect.","Unpair device",async()=>{await api(`/devices/${encodeURIComponent(d.id)}/revoke`,{});await save({...vault,devices:vault.devices.filter(item=>item.id!==d.id)});return "Device unpaired and access revoked";});row.append(details,remove);return row;}));
  $("owner-list").replaceChildren(...vault.delegates.map(o=>node("p",o.name||o.id)));
  if(!vault.delegates.length)$("owner-list").append(node("p","No delegated owners yet.","fine-print"));
 }
-$("add-identity").onclick=()=>{$("identity-form").reset();setMode("generate");$("identity-dialog").showModal();};
-function setMode(next){mode=next;for(const b of document.querySelectorAll("[data-mode]"))b.classList.toggle("selected",b.dataset.mode===mode);$("import-fields").hidden=mode!=="import";$("generation-note").hidden=mode==="import";$("save-identity").textContent=mode==="import"?"Encrypt and save identity":"Create identity";$("private-key").required=mode==="import";updateType();}
+let managementAction;
+function confirmManagement(title,name,message,label,run){managementAction=run;$("management-title").textContent=title;$("management-name").textContent=name;$("management-description").textContent=message;$("management-confirm").textContent=label;$("management-dialog").showModal();}
+$("management-dialog").addEventListener("close",()=>{managementAction=null;});
+$("management-confirm").onclick=()=>action($("management-confirm"),async()=>{const run=managementAction;if(!run)throw new Error("Select an identity or device first");const message=await run();$("management-dialog").close();toast(message);});
+function openIdentity(next){$("identity-form").reset();setMode(next);$("identity-dialog").showModal();}
+$("add-identity").onclick=()=>openIdentity("generate");
+$("import-identity").onclick=()=>openIdentity("import");
+$("identity-dialog").addEventListener("close",()=>{$("identity-form").reset();$("credential-fields").replaceChildren();});
+function setMode(next){mode=next;for(const b of document.querySelectorAll("[data-mode]"))b.classList.toggle("selected",b.dataset.mode===mode);updateType();}
 for(const b of document.querySelectorAll("[data-mode]"))b.onclick=()=>setMode(b.dataset.mode);
 let providers;
 async function updateType(){
- const type=$("identity-type").value,isKey=["ssh","ethereum","bitcoin"].includes(type);$("network-field").hidden=type!=="bitcoin";$("key-passphrase").hidden=type!=="ssh";document.querySelector('label[for="key-passphrase"]').hidden=type!=="ssh";
+ const type=$("identity-type").value,isKey=["ssh","ethereum","bitcoin"].includes(type);$("identity-title").textContent=!isKey?"Add credentials":mode==="import"?"Import an identity":"Create an identity";$("identity-modes").hidden=!isKey;$("import-note").hidden=!isKey||mode!=="import";$("save-identity").textContent=mode==="import"?"Encrypt and save identity":"Create identity";$("network-field").hidden=type!=="bitcoin";$("key-passphrase").hidden=type!=="ssh";document.querySelector('label[for="key-passphrase"]').hidden=type!=="ssh";$("passphrase-note").hidden=type!=="ssh";
  $("credential-fields").hidden=isKey;$("import-fields").hidden=!isKey||mode!=="import";$("private-key").required=isKey&&mode==="import";$("generation-note").hidden=!isKey||mode==="import";
  for(const button of document.querySelectorAll("[data-mode]"))button.disabled=!isKey;
  if(!isKey){$("save-identity").textContent="Encrypt and save credentials";providers??=await work({action:"providers"});const fields=$("credential-fields");fields.replaceChildren();for(const f of providers[type].fields){const label=node("label",f.label),input=node("input");input.id="credential-"+f.name;label.htmlFor=input.id;input.required=f.required;input.type=f.secret?"password":"text";input.autocomplete="off";input.spellcheck=false;input.setAttribute("data-1p-ignore","");fields.append(label,input);}if(type==="payment-card")fields.append(node("p","CVVs stay on your own device and are excluded from cloud storage and backups.","fine-print"));}
@@ -127,8 +138,8 @@ $("backup-form").onsubmit=event=>{event.preventDefault();action(event.submitter,
  if(!restorePreview){
   const decoded=await work({action:"backup-decrypt",password:$("backup-password").value,data:backupFile});$("backup-password").value="";backupFile=null;restorePreview=[];
   const names=new Set(vault.identities.map(i=>i.type+"\0"+i.name));
-  for(const identity of decoded.identities){const duplicate=vault.identities.some(i=>i.id===identity.id || ["ssh","ethereum","bitcoin"].includes(identity.type) && i.type===identity.type && i.network===identity.network && i.publicKey===identity.publicKey);let name=identity.name;let count=1;while(names.has(identity.type+"\0"+name)&&!duplicate){name=identity.name+` (restored ${count++})`;}
-   $("restore-preview").append(node("div",duplicate?`${identity.name} — already present; will be skipped`:`${name} — ${identity.type}${identity.threshold?" (your share only)":""}`,"restore-row"));if(!duplicate){names.add(identity.type+"\0"+name);restorePreview.push({...identity,name,id:b64url(crypto.getRandomValues(new Uint8Array(24)))});}}
+  for(const identity of decoded.identities){const duplicate=vault.identities.some(i=>i.id===identity.id || ["ssh","ethereum","bitcoin"].includes(identity.type) && i.type===identity.type && i.network===identity.network && i.publicKey===identity.publicKey);let name=identity.name;let count=1;while(names.has(identity.type+"\0"+name)&&!duplicate){name=restoredIdentityName(identity.name,count++);}
+   $("restore-preview").append(node("div",duplicate?`${identity.name} — already present; will be skipped`:`${name} — ${identity.type}${identity.threshold?" (your share only)":""}`,"restore-row"));if(!duplicate){names.add(identity.type+"\0"+name);const restored={...identity,name,id:b64url(crypto.getRandomValues(new Uint8Array(24)))};await work({action:"validate",data:JSON.stringify(restored)});restorePreview.push(restored);}}
   $("backup-submit").textContent=`Restore ${restorePreview.length} identities`;$("backup-password").required=false;$("backup-password").hidden=true;document.querySelector('label[for="backup-password"]').hidden=true;return;
  }
  await save({...vault,identities:[...vault.identities,...restorePreview]});restorePreview=null;$("backup-dialog").close();toast("Backup restored; existing identities preserved");
@@ -162,6 +173,17 @@ async function reviewRequest(request){
  }else if(spec.kind==="bitcoin"){
   const identity=vault.identities.find(i=>i.name===spec.identity&&i.type==="bitcoin");const review=await work({action:"review-bitcoin",data:spec.payload,network:spec.network,publicKey:identity?.publicKey||""});content.append(node("h2",review.title));addFields(content,review.fields);for(const warning of review.warnings)content.append(node("p",warning,"warning"));
  }else{content.append(node("h2",spec.kind==="create"?"Create a new identity":"Allow access"));addFields(content,[{label:"Identity",value:spec.identity},{label:"Type",value:spec.identityType},{label:"Duration",value:`${spec.duration} seconds`}]);}
+ $("approve-request").disabled=false;
+ if(request.status==="pending"&&!["create","import","lookup","keychain-import"].includes(spec.kind)){
+  const matches=vault.identities.filter(i=>(!spec.identity||i.name===spec.identity)&&i.type===spec.identityType&&(spec.identityType!=="credentials"||i.network===spec.network));
+  const agent=vault.devices.find(d=>d.id===spec.agentId);let problem="";
+  if(!matches.length)problem=`Import or create the ${spec.identityType} identity “${spec.identity||"requested identity"}” before approving.`;
+  else if(matches.length>1)problem="More than one identity matches. Ask the requesting device to select one by name.";
+  else if(matches[0].threshold)problem="Shared identities require every delegated owner. This preview cannot approve them yet.";
+  else if(!agent||(spec.managed&&agent.role!=="agent"))problem="Pair the requested signing device in Settings before approving.";
+  else if(!request.receiver)problem="The signing device is not ready. Keep it running and reopen this request.";
+  if(problem){$("approve-request").disabled=true;const help=node("div",undefined,"warning review-problem");help.append(node("p",problem));if(!matches.length&&["ssh","ethereum","bitcoin"].includes(spec.identityType)){const button=node("button","Import existing key","button outline small");button.onclick=()=>{$("review-dialog").close();openIdentity("import");$("identity-name").value=spec.identity;$("identity-type").value=spec.identityType;updateType();};help.append(button);}content.append(help);}
+ }
  if(generation!==epoch||!root)throw new Error("Vault locked; review cancelled");$("review-dialog").showModal();
 }
 $("decline-request").onclick=()=>action($("decline-request"),async()=>{await api(`/requests/${selectedRequest.request.id}/${selectedRequest.request.status==="approved"?"revoke":"decline"}`,{});$("review-dialog").close();refreshRequests();});
@@ -178,14 +200,14 @@ $("approve-request").onclick=()=>action($("approve-request"),async()=>{
    const identity=spec.kind==="import"?selectedRequest.imported:await work({action:"generate",name:spec.identity,type:spec.identityType,network:spec.network||""});
    if(!identity)throw new Error("Review the identity before importing");await save({...vault,identities:[...vault.identities,identity]});const {secret,...publicIdentity}=identity;result=publicIdentity;
   }
-  const response=await sign(root,"response",{requestId:spec.id,requestHash:await digest(unb64(request.signed.payload)),result:b64(bytes(JSON.stringify(result))),expiresAt:new Date(Date.now()+120000).toISOString()});await api(`/requests/${spec.id}/complete`,{response,verification});
+  const response=await sign(root,"response",{requestId:spec.id,requestHash:await digest(unb64(request.signed.payload)),result:b64(bytes(JSON.stringify(result))),expiresAt:new Date(Date.now()+120000).toISOString()});await api(`/requests/${spec.id}/complete`,{response,verification,vaultVersion:version});
  }else{
   const matches=vault.identities.filter(i=>(!spec.identity||i.name===spec.identity)&&i.type===spec.identityType&&(spec.identityType!=="credentials"||i.network===spec.network));if(matches.length>1)throw new Error("More than one identity matches; request one by name");const identity=matches[0];if(!identity)throw new Error("The selected identity does not exist");if(identity.threshold)throw new Error("This identity requires every delegated owner");
   const agent=vault.devices.find(d=>d.id===spec.agentId);if(!agent||(spec.managed&&agent.role!=="agent")||!request.receiver)throw new Error("The signing device is not ready or is not pinned");const receiver=await verify(agent.publicKey,"receiver",request.receiver);const requestHash=await digest(unb64(request.signed.payload));if(receiver.requestId!==spec.id || receiver.requestHash!==requestHash || Date.parse(receiver.expiresAt)<=Date.now())throw new Error("Device receiver expired or does not match this request");
   const receiverHash=await digest(unb64(request.receiver.payload)),expiresAt=new Date(Math.min(Date.now()+spec.duration*1000,Date.parse(receiver.expiresAt))).toISOString();
   const approval=await sign(root,"approval",{requestId:spec.id,requestHash,receiverHash,identityId:identity.id,identityType:identity.type,publicKey:identity.publicKey,secret:identity.secret,expiresAt,requesterPublic:device.publicKey});
   const authorization=await sign(root,"authorization",{requestId:spec.id,requestHash,receiverHash,agentPublic:agent.publicKey,publicKey:identity.publicKey,expiresAt});
-  const box=await envelope(receiver.publicKey,`approval:${spec.id}`,approval);await api(`/requests/${spec.id}/approve`,{box,verification,authorization});
+  const box=await envelope(receiver.publicKey,`approval:${spec.id}`,approval);await api(`/requests/${spec.id}/approve`,{box,verification,authorization,vaultVersion:version});
  }
  $("review-dialog").close();toast("Request approved");refreshRequests();
 });
@@ -207,4 +229,5 @@ $("notifications").onclick=()=>action($("notifications"),async()=>{
  await serviceWorker;const registration=await navigator.serviceWorker.ready;const config=await api("/push/key");const subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:unb64(config.publicKey)});await api("/push/subscribe",subscription.toJSON());toast("Notifications enabled on this device");
 });
 try{session=await api("/session");show("unlock-view");await rehydrate();}catch{show("auth-view");}
+if(location.hash)selectTab(location.hash.slice(1));
 setInterval(()=>{if(root&&!$("requests-panel").hidden)refreshRequests();},2000);

@@ -8,6 +8,14 @@ On iPhone and iPad, add the app to the Home Screen, open the installed app, and 
 
 Browser sign-in survives server/app restarts through a secure session cookie. The browser stores only an encrypted unlock cache in localStorage; opening it requires a wrapping secret obtained using the current cookie. Signing out invalidates that session, clears the cache, resets sensitive forms, and terminates the browser worker. A fresh passkey verification is required for each approval.
 
+## Import and manage identities
+
+On **Identities**, choose **Import existing** to paste an SSH private key you already use. Select SSH key, give it a name, paste the complete key, and enter its existing passphrase if encrypted. **Encrypt and save identity** opens the key locally and saves a browser-encrypted copy. The key and passphrase are not sent to Grexie in readable form. **Create new** is a separate action that generates a new key; servers will not trust that new public key until you install it there.
+
+Each identity has a **Delete** control with confirmation. Deletion revokes matching active and pending access before saving the encrypted vault, including requests that selected the identity by default. Other open browsers must reload before approving against an older vault version. Keep the original key or an encrypted backup if you need recovery; deletion does not disconnect SSH sessions that have already authenticated or erase copies outside Vault.
+
+In **Settings → Connected devices**, choose **Unpair** to revoke a device and its access. Pairing again requires a new CLI configuration and approval. If you unpair a signing agent, clients need another approved signing agent before they can use their keys.
+
 ## Approvals
 
 A device request names the identity, describes its purpose and specifies a duration. Open Requests, review the decoded operation and approve with your passkey. Each requesting client is paired separately from the trusted signing device. Use Revoke to stop new operations. A completed signature or an already authenticated SSH connection cannot be recalled.
@@ -48,7 +56,7 @@ The storage key is exactly 32 random bytes. The application never invents a repl
 
 Every application document is AES-256-GCM encrypted, including account, WebAuthn, session, push and request records. Opaque HMAC routing/index keys, record versions and expiry timestamps remain visible to MongoDB. Identity contents have an additional browser-only encryption layer. MongoDB's own operational metadata, logs, backups and traffic need the operator's usual protections.
 
-The cloud process is a single service replica. Rate limits and active-request admission are bounded in that process; distribute admission controls before scaling it horizontally. Limit public ingress request sizes and connection rates. When running behind a proxy, set `--trusted-proxies` (or `VAULT_TRUSTED_PROXIES`) to its exact peer IPs or a dedicated ingress-only CIDR. Vault requires one literal `X-Real-IP` from those peers and ignores forwarded headers from other peers. The proxy must discard client-supplied forwarding headers before setting that value. Never trust an unrestricted range or a shared network that arbitrary clients can join. Update this setting if a dynamically addressed proxy changes its peer IP. Browser authentication and device enrollment use separate rate limits.
+The cloud process is a single service replica. Rate limits, active-request admission and serialization of vault changes with approvals are enforced in that process. Distributed admission and a shared transaction/locking mechanism are required before scaling it horizontally. Limit public ingress request sizes and connection rates. When running behind a proxy, set `--trusted-proxies` (or `VAULT_TRUSTED_PROXIES`) to its exact peer IPs or a dedicated ingress-only CIDR. Vault requires one literal `X-Real-IP` from those peers and ignores forwarded headers from other peers. The proxy must discard client-supplied forwarding headers before setting that value. Never trust an unrestricted range or a shared network that arbitrary clients can join. Update this setting if a dynamically addressed proxy changes its peer IP. Browser authentication and device enrollment use separate rate limits.
 
 ## Backups and changes
 

@@ -212,13 +212,18 @@ func (m *Mongo) Get(ctx context.Context, id string) (Document, error) {
 	return d, e
 }
 func (m *Mongo) List(ctx context.Context, scope string) ([]Document, error) {
-	cur, e := m.records.Find(ctx, bson.M{"scope": scope}, options.Find().SetLimit(2000))
+	// Never return a partial authorization/revocation view. The extra record
+	// detects overflow so callers can fail closed instead of missing a grant.
+	cur, e := m.records.Find(ctx, bson.M{"scope": scope}, options.Find().SetLimit(2001))
 	if e != nil {
 		return nil, e
 	}
 	defer cur.Close(ctx)
 	var out []Document
 	e = cur.All(ctx, &out)
+	if e == nil && len(out) > 2000 {
+		return nil, errors.New("encrypted record scope exceeds supported bound")
+	}
 	return out, e
 }
 func (m *Mongo) Put(ctx context.Context, d Document, expected int64) error {

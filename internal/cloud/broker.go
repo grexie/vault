@@ -334,7 +334,7 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request, session Se
 	out := []vaultwire.RequestState{}
 	for _, doc := range docs {
 		var q vaultwire.RequestState
-		if s.store.Open(doc, &q) == nil && (q.Status == "pending" || q.Status == "approved") {
+		if s.store.Open(doc, &q) == nil && (q.Status == "pending" || q.Status == "approved") && s.participantsActive(r, q) {
 			q.Box = nil
 			q.Response = nil
 			out = append(out, q)
@@ -347,8 +347,14 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request, session 
 		Box           vaultwire.Envelope `json:"box"`
 		Verification  string             `json:"verification"`
 		Authorization *vaultwire.Signed  `json:"authorization,omitempty"`
+		VaultVersion  int64              `json:"vaultVersion"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	s.vaultMutation.Lock()
+	defer s.vaultMutation.Unlock()
+	if !s.requireVaultVersion(w, r, user, in.VaultVersion) {
 		return
 	}
 	q, v, e := s.request(r, user.key())
@@ -376,8 +382,14 @@ func (s *Server) completeRequest(w http.ResponseWriter, r *http.Request, session
 	var in struct {
 		Response     vaultwire.Signed `json:"response"`
 		Verification string           `json:"verification"`
+		VaultVersion int64            `json:"vaultVersion"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	s.vaultMutation.Lock()
+	defer s.vaultMutation.Unlock()
+	if !s.requireVaultVersion(w, r, user, in.VaultVersion) {
 		return
 	}
 	q, v, e := s.request(r, user.key())
