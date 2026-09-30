@@ -37,8 +37,8 @@ func TestSecurityReviewDockerHelperKeepsCredentialsOffDisk(t *testing.T) {
 	}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: time.Second}
-	call := func(registry, token string) (int, []byte, error) {
-		r, e := http.NewRequestWithContext(context.Background(), "POST", "http://local/get", strings.NewReader(registry))
+	callOperation := func(operation, payload, token string) (int, []byte, error) {
+		r, e := http.NewRequestWithContext(context.Background(), "POST", "http://local/"+operation, strings.NewReader(payload))
 		if e != nil {
 			return 0, nil, e
 		}
@@ -50,6 +50,9 @@ func TestSecurityReviewDockerHelperKeepsCredentialsOffDisk(t *testing.T) {
 		defer response.Body.Close()
 		b, e := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return response.StatusCode, b, e
+	}
+	call := func(registry, token string) (int, []byte, error) {
+		return callOperation("get", registry, token)
 	}
 	if code, _, err := call("other-registry.example", env["VAULT_DOCKER_HELPER_TOKEN"]); err != nil || code != 403 {
 		t.Fatal("unapproved registry accepted", code, err)
@@ -64,6 +67,39 @@ func TestSecurityReviewDockerHelperKeepsCredentialsOffDisk(t *testing.T) {
 	var result map[string]string
 	if json.Unmarshal(raw, &result) != nil || result["Username"] != credential.Fields["username"] || result["Secret"] != credential.Fields["password"] {
 		t.Fatal("helper returned wrong credential")
+	}
+	storeBody := func(server, username, secret string) string {
+		b, err := json.Marshal(map[string]string{"ServerURL": server, "Username": username, "Secret": secret})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	approvedStore := storeBody(credential.Fields["server"], credential.Fields["username"], credential.Fields["password"])
+	if code, response, err := callOperation("store", approvedStore, env["VAULT_DOCKER_HELPER_TOKEN"]); err != nil || code != 200 || len(response) != 0 {
+		t.Fatal("Docker login could not confirm approved credential", code, err)
+	}
+	for name, body := range map[string]string{
+		"different registry": storeBody("other-registry.example", credential.Fields["username"], credential.Fields["password"]),
+		"different username": storeBody(credential.Fields["server"], "different-user", credential.Fields["password"]),
+		"different secret":   storeBody(credential.Fields["server"], credential.Fields["username"], "replacement-secret"),
+		"trailing JSON":      approvedStore + `{}`,
+		"unknown fields":     strings.TrimSuffix(approvedStore, "}") + `,"extra":"value"}`,
+		"empty credential":   `{}`,
+	} {
+		if code, _, err := callOperation("store", body, env["VAULT_DOCKER_HELPER_TOKEN"]); err != nil || code != 403 {
+			t.Error(name, "was not refused", code, err)
+		}
+	}
+	if code, _, err := callOperation("store", approvedStore, "incorrect-token"); err != nil || code != 403 {
+		t.Fatal("store without the capability accepted", code, err)
+	}
+	if code, _, err := callOperation("erase", credential.Fields["server"], env["VAULT_DOCKER_HELPER_TOKEN"]); err != nil || code != 403 {
+		t.Fatal("credential erasure accepted", code, err)
+	}
+	code, afterStore, err := call(credential.Fields["server"], env["VAULT_DOCKER_HELPER_TOKEN"])
+	if err != nil || code != 200 || !bytes.Equal(raw, afterStore) {
+		t.Fatal("store changed the approved credential", code, err)
 	}
 	checkFiles := func() {
 		t.Helper()

@@ -39,12 +39,39 @@ func dockerHelper(ctx context.Context, dir string, c Credentials) (map[string]st
 	token := base64.RawURLEncoding.EncodeToString(random)
 	clear(random)
 	server := &http.Server{ReadHeaderTimeout: time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" || r.URL.Path != "/get" || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
+		if r.Method != "POST" || (r.URL.Path != "/get" && r.URL.Path != "/store") || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
 			http.Error(w, "denied", 403)
 			return
 		}
-		b, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
-		if e != nil || strings.TrimSpace(string(b)) != c.Fields["server"] {
+		limit := int64(4096)
+		if r.URL.Path == "/store" {
+			limit = 1024 * 1024
+		}
+		b, e := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+		defer clear(b)
+		if e != nil {
+			http.Error(w, "invalid request", 400)
+			return
+		}
+		if r.URL.Path == "/store" {
+			// docker login stores the credential again after authenticating.
+			// Acknowledge only the already-approved value, without writing it
+			// to disk or changing the credential held by this helper.
+			var value struct {
+				ServerURL string
+				Username  string
+				Secret    string
+			}
+			decoder := json.NewDecoder(bytes.NewReader(b))
+			decoder.DisallowUnknownFields()
+			if decoder.Decode(&value) != nil || decoder.Decode(new(any)) != io.EOF || value.ServerURL != c.Fields["server"] || subtle.ConstantTimeCompare([]byte(value.Username), []byte(c.Fields["username"])) != 1 || subtle.ConstantTimeCompare([]byte(value.Secret), []byte(c.Fields["password"])) != 1 {
+				http.Error(w, "only the approved registry credential can be confirmed", 403)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if strings.TrimSpace(string(b)) != c.Fields["server"] {
 			http.Error(w, "registry not approved", 403)
 			return
 		}
@@ -83,15 +110,19 @@ func dockerHelper(ctx context.Context, dir string, c Credentials) (map[string]st
 	return map[string]string{"VAULT_DOCKER_HELPER_SOCKET": path, "VAULT_DOCKER_HELPER_TOKEN": token, "PATH": helperDir + string(os.PathListSeparator) + os.Getenv("PATH")}, closeFn, nil
 }
 func DockerCredentialHelper(ctx context.Context, args []string) error {
-	if len(args) != 1 || args[0] != "get" {
-		return errors.New("this temporary helper only retrieves the approved registry credential")
+	if len(args) != 1 || (args[0] != "get" && args[0] != "store") {
+		return errors.New("this temporary helper only retrieves or confirms the approved registry credential")
 	}
 	socket, token := os.Getenv("VAULT_DOCKER_HELPER_SOCKET"), os.Getenv("VAULT_DOCKER_HELPER_TOKEN")
 	if socket == "" || token == "" {
 		return errors.New("Docker credential approval has ended")
 	}
-	registry, e := io.ReadAll(io.LimitReader(os.Stdin, 4097))
-	if e != nil || len(registry) > 4096 {
+	limit := int64(4096)
+	if args[0] == "store" {
+		limit = 1024 * 1024
+	}
+	registry, e := io.ReadAll(io.LimitReader(os.Stdin, limit+1))
+	if e != nil || int64(len(registry)) > limit {
 		return errors.New("invalid registry")
 	}
 	defer clear(registry)
@@ -100,7 +131,7 @@ func DockerCredentialHelper(ctx context.Context, args []string) error {
 	}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
-	req, e := http.NewRequestWithContext(ctx, "POST", "http://local/get", bytes.NewReader(registry))
+	req, e := http.NewRequestWithContext(ctx, "POST", "http://local/"+args[0], bytes.NewReader(registry))
 	if e != nil {
 		return e
 	}
