@@ -38,7 +38,6 @@ services:
         delay: 5s
       labels:
         - traefik.enable=true
-        - traefik.docker.network=traefik
         - traefik.swarm.network=traefik
         - traefik.http.routers.grexie-vault-http.rule=Host(`vault.grexie.com`)
         - traefik.http.routers.grexie-vault-http.entrypoints=http
