@@ -1,6 +1,6 @@
 //go:build unix
 
-package main
+package command
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grexie/remote-ssh-agent/internal/bridge"
-	"github.com/grexie/remote-ssh-agent/internal/limits"
+	"github.com/grexie/vault/internal/bridge"
+	"github.com/grexie/vault/internal/limits"
 )
 
 func grantCommand(ctx context.Context, args []string) error {

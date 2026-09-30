@@ -1,7 +1,7 @@
 package app
 
 import (
-	"github.com/grexie/remote-ssh-agent/internal/proof"
+	"github.com/grexie/vault/internal/proof"
 	"net/http"
 	"net/http/httptest"
 	"testing"

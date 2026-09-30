@@ -9,3 +9,6 @@ playwright-report
 *.key
 *.pem
 .env
+secrets
+.env.*
+web/static/wasm_exec 2.js

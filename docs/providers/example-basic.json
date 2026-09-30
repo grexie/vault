@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "example-basic",
+  "label": "Example basic",
+  "fields": [
+    {
+      "name": "username",
+      "label": "Username",
+      "required": true,
+      "secret": false
+    },
+    {
+      "name": "password",
+      "label": "Password",
+      "required": true,
+      "secret": true
+    }
+  ],
+  "http": {
+    "origin": "https://api.example.com",
+    "pathPrefix": "/v1/",
+    "methods": [
+      "GET"
+    ],
+    "auth": {
+      "method": "basic",
+      "username": "username",
+      "password": "password"
+    }
+  }
+}

@@ -23,9 +23,9 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
-	"github.com/grexie/remote-ssh-agent/internal/access"
-	"github.com/grexie/remote-ssh-agent/internal/keyparse"
-	"github.com/grexie/remote-ssh-agent/internal/limits"
+	"github.com/grexie/vault/internal/access"
+	"github.com/grexie/vault/internal/keyparse"
+	"github.com/grexie/vault/internal/limits"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"

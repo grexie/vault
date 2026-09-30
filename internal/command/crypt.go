@@ -1,6 +1,6 @@
 //go:build unix
 
-package main
+package command
 
 import (
 	"bufio"
@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"filippo.io/age"
-	"github.com/grexie/remote-ssh-agent/internal/ageio"
-	"github.com/grexie/remote-ssh-agent/internal/app"
-	"github.com/grexie/remote-ssh-agent/internal/bridge"
+	"github.com/grexie/vault/internal/ageio"
+	"github.com/grexie/vault/internal/app"
+	"github.com/grexie/vault/internal/bridge"
 )
 
 type stringsFlag []string

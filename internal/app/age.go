@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"filippo.io/age/agessh"
-	"github.com/grexie/remote-ssh-agent/internal/access"
-	"github.com/grexie/remote-ssh-agent/internal/limits"
-	"github.com/grexie/remote-ssh-agent/internal/signer"
+	"github.com/grexie/vault/internal/access"
+	"github.com/grexie/vault/internal/limits"
+	"github.com/grexie/vault/internal/signer"
 	"golang.org/x/crypto/ssh"
 )
 

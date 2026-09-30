@@ -19,10 +19,10 @@ import (
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/grexie/remote-ssh-agent/internal/proof"
-	"github.com/grexie/remote-ssh-agent/internal/signer"
-	"github.com/grexie/remote-ssh-agent/internal/vault"
-	"github.com/grexie/remote-ssh-agent/web"
+	"github.com/grexie/vault/internal/proof"
+	"github.com/grexie/vault/internal/signer"
+	"github.com/grexie/vault/internal/vault"
+	"github.com/grexie/vault/web"
 )
 
 type Config struct {

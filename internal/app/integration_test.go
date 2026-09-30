@@ -28,8 +28,8 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/fxamacker/cbor/v2"
-	"github.com/grexie/remote-ssh-agent/internal/proof"
-	"github.com/grexie/remote-ssh-agent/internal/signer"
+	"github.com/grexie/vault/internal/proof"
+	"github.com/grexie/vault/internal/signer"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/ssh"
 )

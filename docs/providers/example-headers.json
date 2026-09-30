@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "name": "example-headers",
+  "label": "Example headers",
+  "fields": [
+    {
+      "name": "token",
+      "label": "API token",
+      "secret": true,
+      "required": true
+    }
+  ],
+  "http": {
+    "origin": "https://api.example.com",
+    "pathPrefix": "/v1/",
+    "methods": [
+      "GET"
+    ],
+    "auth": {
+      "method": "headers",
+      "fields": {
+        "X-API-Key": "token"
+      }
+    }
+  }
+}

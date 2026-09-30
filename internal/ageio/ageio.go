@@ -12,7 +12,7 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 	"filippo.io/age/armor"
-	"github.com/grexie/remote-ssh-agent/internal/limits"
+	"github.com/grexie/vault/internal/limits"
 )
 
 func ParseRecipient(value string) (age.Recipient, error) {

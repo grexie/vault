@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/grexie/remote-ssh-agent/internal/proof"
+	"github.com/grexie/vault/internal/proof"
 )
 
 func TestCopiedCapabilityAndReplayedProofCannotSign(t *testing.T) {

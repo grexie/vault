@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grexie/remote-ssh-agent/internal/access"
-	"github.com/grexie/remote-ssh-agent/internal/app"
+	"github.com/grexie/vault/internal/access"
+	"github.com/grexie/vault/internal/app"
 )
 
 // IsManagedSocket chooses the inherited IdentityAgent before ensure validates

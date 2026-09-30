@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grexie/remote-ssh-agent/internal/app"
-	"github.com/grexie/remote-ssh-agent/internal/proof"
+	"github.com/grexie/vault/internal/app"
+	"github.com/grexie/vault/internal/proof"
 )
 
 type Config struct {

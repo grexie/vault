@@ -1,0 +1,63 @@
+services:
+  cloud:
+    image: ${VAULT_IMAGE:-grexie-vault:local}
+    command: ["cloud", "--listen", "0.0.0.0:8791"]
+    environment:
+      VAULT_ORIGIN: https://vault.grexie.com
+      VAULT_MONGODB_DATABASE: grexie_vault
+      VAULT_MONGODB_URI_FILE: /run/secrets/vault_mongodb_uri
+      VAULT_STORAGE_KEY_FILE: /run/secrets/vault_storage_key
+      VAULT_MONGODB_ALLOW_PRIVATE_PLAINTEXT: "true"
+      VAULT_TRUSTED_PROXIES: ${VAULT_TRUSTED_PROXIES:?Set exact trusted ingress peer CIDRs}
+    read_only: true
+    networks: [traefik, mongo]
+    secrets:
+      - source: vault_storage_key_v1
+        target: vault_storage_key
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+      - source: vault_mongodb_uri_v1
+        target: vault_mongodb_uri
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname == node-1]
+      resources:
+        limits: { cpus: "1.00", memory: 512M }
+        reservations: { cpus: "0.10", memory: 64M }
+      update_config:
+        order: stop-first
+        failure_action: rollback
+        monitor: 30s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=traefik
+        - traefik.swarm.network=traefik
+        - traefik.http.routers.grexie-vault-http.rule=Host(`vault.grexie.com`)
+        - traefik.http.routers.grexie-vault-http.entrypoints=http
+        - traefik.http.routers.grexie-vault-http.middlewares=grexie-vault-https
+        - traefik.http.routers.grexie-vault-http.service=grexie-vault
+        - traefik.http.middlewares.grexie-vault-https.redirectscheme.scheme=https
+        - traefik.http.middlewares.grexie-vault-https.redirectscheme.permanent=true
+        - traefik.http.routers.grexie-vault.rule=Host(`vault.grexie.com`)
+        - traefik.http.routers.grexie-vault.entrypoints=https
+        - traefik.http.routers.grexie-vault.tls=true
+        - traefik.http.routers.grexie-vault.tls.certresolver=le
+        - traefik.http.routers.grexie-vault.service=grexie-vault
+        - traefik.http.services.grexie-vault.loadbalancer.server.port=8791
+        - traefik.http.services.grexie-vault.loadbalancer.healthcheck.path=/api/v1/health
+        - traefik.http.services.grexie-vault.loadbalancer.healthcheck.interval=15s
+        - traefik.http.services.grexie-vault.loadbalancer.healthcheck.timeout=3s
+networks:
+  traefik: { external: true }
+  mongo: { external: true }
+secrets:
+  vault_storage_key_v1: { external: true }
+  vault_mongodb_uri_v1: { external: true }

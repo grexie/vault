@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grexie/remote-ssh-agent/internal/app"
+	"github.com/grexie/vault/internal/app"
 )
 
 func TestRevokeAfterRestartAndJobIsolation(t *testing.T) {

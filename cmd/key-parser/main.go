@@ -3,7 +3,7 @@
 package main
 
 import (
-	"github.com/grexie/remote-ssh-agent/internal/keyparse"
+	"github.com/grexie/vault/internal/keyparse"
 	"golang.org/x/crypto/ssh"
 	"syscall/js"
 )

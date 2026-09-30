@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grexie/remote-ssh-agent/internal/app"
-	"github.com/grexie/remote-ssh-agent/internal/limits"
+	"github.com/grexie/vault/internal/app"
+	"github.com/grexie/vault/internal/limits"
 )
 
 func Grant(ctx context.Context, c Config, session, reason string, idle time.Duration, noWait bool, progress func(string)) (app.Request, error) {

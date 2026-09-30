@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grexie/remote-ssh-agent/internal/limits"
-	"github.com/grexie/remote-ssh-agent/internal/signer"
+	"github.com/grexie/vault/internal/limits"
+	"github.com/grexie/vault/internal/signer"
 )
 
 // A job has its own short-lived capability and socket. It cannot unlock the

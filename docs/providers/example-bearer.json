@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "name": "example-bearer",
+  "label": "Example service",
+  "fields": [
+    {
+      "name": "token",
+      "label": "API token",
+      "secret": true,
+      "required": true
+    }
+  ],
+  "cli": {
+    "executable": "examplectl",
+    "env": {
+      "EXAMPLE_TOKEN": "token"
+    }
+  },
+  "http": {
+    "origin": "https://api.example.com",
+    "pathPrefix": "/v1/",
+    "methods": [
+      "GET"
+    ],
+    "auth": {
+      "method": "bearer",
+      "token": "token"
+    }
+  }
+}

@@ -8,7 +8,7 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
-	"github.com/grexie/remote-ssh-agent/internal/signer"
+	"github.com/grexie/vault/internal/signer"
 	"golang.org/x/crypto/ssh"
 )
 
