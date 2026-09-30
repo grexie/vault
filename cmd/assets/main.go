@@ -19,7 +19,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	for _, n := range []int{32, 180, 192, 512} {
+	for _, n := range []int{32, 128, 180, 192, 512} {
 		out := image.NewRGBA(image.Rect(0, 0, n, n))
 		draw.CatmullRom.Scale(out, out.Bounds(), source, source.Bounds(), draw.Src, nil)
 		name := fmt.Sprintf("web/static/icon-%d.png", n)

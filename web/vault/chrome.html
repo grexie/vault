@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f5f5f7">
+  <meta name="description" content="Install Grexie Vault for Chrome. Connect your Ethereum identities to websites and approve signatures from your Vault device.">
+  <title>Vault for Chrome — Grexie Vault</title>
+  <link rel="icon" href="/favicon-32.png">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/home.css">
+  <link rel="stylesheet" href="/chrome.css">
+</head>
+<body class="landing">
+  <header class="global-nav">
+    <a class="vault-brand" href="/"><img src="/icon-180.png" alt="" width="28" height="28"><span>Vault<span class="by-grexie"> by Grexie</span></span></a>
+    <nav aria-label="Main navigation"><a href="/browser-wallet.html">Wallet guide</a><a href="https://github.com/grexie/vault">Source ↗</a><a class="nav-open" href="/app/">Open Vault</a></nav>
+  </header>
+  <main>
+    <section class="chrome-hero">
+      <div class="chrome-intro">
+        <p class="section-kicker">VAULT FOR CHROME</p>
+        <h1>Your wallet.<br>Your device.</h1>
+        <p class="chrome-lead">Use your Vault identities on the web.<br>Approve each signature from your phone.</p>
+        <div class="hero-links"><a class="pill-button" href="#install">Set up in Chrome <span aria-hidden="true">↓</span></a><a href="https://github.com/grexie/vault/releases/download/v0.3.0-preview.8/grexie-vault_v0.3.0-preview.8_chrome.zip">Download extension ZIP ↗</a></div>
+        <p class="chrome-availability">Preview · Chrome on macOS and Linux</p><p class="chrome-disclosure">Vault processes the website origin, selected public address and wallet requests to provide approvals and signing. <a href="/chrome-wallet-privacy.html">How your data is used ↗</a></p>
+      </div>
+      <div class="chrome-art"><img src="/shield-hero.png" alt="A white shield with a glass keyhole and silver key" width="1448" height="1086" fetchpriority="high"></div>
+    </section>
+    <section class="chrome-promise" aria-label="How the wallet works">
+      <p><strong>A familiar wallet.</strong> Choose Vault when a website asks you to connect.</p>
+      <p><strong>A separate approval.</strong> See the website, message or transaction in Vault.</p>
+      <p><strong>Your signing device.</strong> The extension never receives your private key.</p>
+    </section>
+    <section class="chrome-setup" id="install">
+      <div class="chrome-section-heading"><p class="section-kicker">ONE-TIME SETUP</p><h2>Bring Vault to your browser.</h2><p>You’ll need your paired Vault command and a signing device. Already use Vault on this computer? Start with step 2.</p></div>
+      <ol class="install-steps">
+        <li>
+          <span class="install-number" aria-hidden="true">1</span>
+          <div><h3>Get the Vault command.</h3><p>Download the package for your computer, extract it, and install the <code>vault</code> executable somewhere on your PATH. Follow the setup guide to pair this computer and connect your signing device.</p>
+            <div class="platform-downloads" aria-label="Vault command downloads">
+              <a href="https://github.com/grexie/vault/releases/download/v0.3.0-preview.8/grexie-vault_v0.3.0-preview.8_darwin-arm64.tar.gz">Mac · Apple silicon <span aria-hidden="true">↗</span></a>
+              <a href="https://github.com/grexie/vault/releases/download/v0.3.0-preview.8/grexie-vault_v0.3.0-preview.8_darwin-amd64.tar.gz">Mac · Intel <span aria-hidden="true">↗</span></a>
+              <a href="https://github.com/grexie/vault/releases/download/v0.3.0-preview.8/grexie-vault_v0.3.0-preview.8_linux-amd64.tar.gz">Linux · x64 <span aria-hidden="true">↗</span></a>
+              <a href="https://github.com/grexie/vault/releases/download/v0.3.0-preview.8/grexie-vault_v0.3.0-preview.8_linux-arm64.tar.gz">Linux · ARM64 <span aria-hidden="true">↗</span></a>
+            </div>
+            <p class="install-links"><a href="/guide.html#signing-device-and-client">Pair your computer ↗</a><a href="https://github.com/grexie/vault/releases/download/v0.3.0-preview.8/SHA256SUMS">Checksums ↗</a></p>
+          </div>
+        </li>
+        <li>
+          <span class="install-number" aria-hidden="true">2</span>
+          <div><h3>Connect Chrome to Vault.</h3><p>Run this in Terminal on the computer where you use Chrome:</p><pre><code>vault browser-wallet install</code></pre><p>The command installs the extension files and registers the local bridge. It prints the folder to select in the next step. No port, token or extra account to configure.</p></div>
+        </li>
+        <li>
+          <span class="install-number" aria-hidden="true">3</span>
+          <div><h3>Load the extension in Chrome.</h3><p>Enter <code>chrome://extensions</code> in Chrome’s address bar. Turn on <strong>Developer mode</strong>, choose <strong>Load unpacked</strong>, then select the extension folder printed by Vault.</p><p>The CLI already includes the extension. If you downloaded the ZIP separately, extract it into a permanent folder and select that folder instead.</p><p class="install-note">This preview is distributed directly by Grexie. It isn’t listed in the Chrome Web Store yet, so a website cannot install it with one click.</p></div>
+        </li>
+      </ol>
+      <div class="chrome-ready"><img src="/icon-180.png" alt="" width="52" height="52"><div><h3>Open a website. Choose Grexie Vault.</h3><p>Approve the connection in Vault and choose an Ethereum identity. Every signature and transaction asks for its own approval.</p><a href="/browser-wallet.html">Read the wallet guide ↗</a></div></div>
+    </section>
+    <section class="chrome-help">
+      <h2>A few useful details.</h2>
+      <details><summary>How do I check everything is connected?</summary><p>Run <code>vault browser-wallet doctor</code>. It checks your pairing, public identities, signing device, cloud connection and Chrome integration. Open the extension popup to check the current website.</p></details>
+      <details><summary>Can I keep my other wallet?</summary><p>Yes. Vault announces itself alongside other installed wallets. Choose Grexie Vault in websites that offer a wallet selector.</p></details>
+      <details><summary>Can an AI agent use it?</summary><p>Yes. An agent can use the same website buttons and wallet selector you do, then wait while you review the request in Vault. A connection shares a public address; it never grants permission for a later signature or transaction. <a href="/SKILL.md">Read the agent instructions ↗</a></p></details>
+      <details><summary>How do I update or remove it?</summary><p>Update your Vault command, run <code>vault browser-wallet install</code> again, then choose Reload on Vault’s card at <code>chrome://extensions</code>. To remove it, run <code>vault browser-wallet uninstall</code> and remove the Chrome extension. Your Vault identities and pairing remain in place.</p></details>
+    </section>
+  </main>
+  <footer class="consumer-footer"><div><a class="vault-brand" href="/">Vault<span class="by-grexie"> by Grexie</span></a><span>© 2026 Grexie</span></div><nav aria-label="Footer"><a href="/browser-wallet.html">Wallet guide</a><a href="/architecture.html">Architecture</a><a href="/SKILL.md">AI skill</a><a href="/chrome-wallet-privacy.html">Wallet privacy</a><a href="https://github.com/grexie/vault/releases/tag/v0.3.0-preview.8">Release & source ↗</a></nav><p>Open source, MIT licensed. Signing requires a paired user-controlled signing device. Read the <a href="https://github.com/grexie/vault/blob/main/docs/security-review-2026-09-30.md">security review</a> and trust boundaries before use.</p></footer>
+</body>
+</html>

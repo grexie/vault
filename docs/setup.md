@@ -70,6 +70,8 @@ This release preserves the existing Remote SSH Agent as a compatibility binary. 
 
 ## Chrome wallet
 
+The [Chrome installation page](/chrome.html) provides CLI and extension downloads with step-by-step instructions.
+
 Run `vault browser-wallet install` on the paired requesting computer. Load the bundled extension directory printed by the command in Chrome's **Load unpacked** control, then select **Grexie Vault** on a Web3 site. Chrome starts the local native host automatically; there is no port or token to configure. `vault browser-wallet doctor` checks the CLI, native integration, public identity catalogue, configured networks, cloud and signing endpoint.
 
 Choose an Ethereum identity and approve the website connection in Vault. Each signature or transaction asks separately. The popup's **Change identity** opens another connection request; revoke sites in Vault → Settings → Connected websites. See the [complete wallet guide](/browser-wallet.html) for network support, message methods, sign-and-submit consent, installation and recovery. Hyperliquid public balance, positions and orders are available through the [dedicated CLI](/hyperliquid.html).

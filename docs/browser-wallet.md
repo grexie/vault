@@ -4,6 +4,8 @@ Grexie Vault works as an injected Ethereum wallet. Chrome holds public addresses
 
 ## Install
 
+Use the [Chrome installation page](https://vault.grexie.com/chrome.html) for downloads and the three-step setup.
+
 Install the current `vault` release and pair it with your Vault account and signing device using the [setup guide](setup.md). Then run:
 
 ```sh

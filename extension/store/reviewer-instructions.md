@@ -1,0 +1,14 @@
+# Reviewer setup
+
+This extension requires a separately installed native command and a user-controlled signing device. The hosted service does not hold readable private keys. There are no shared reviewer passwords or seeded real-money accounts.
+
+1. Install the matching macOS or Linux Vault release from the public GitHub release linked on https://vault.grexie.com/chrome.html. Use a clean test operating-system account if preferred. Source, checksums and build instructions are included.
+2. Open https://vault.grexie.com/app/ in a browser whose passkey provider supports WebAuthn PRF. Create a new disposable Vault account/passkey. In Identities, create an Ethereum test identity. Do not use real funds.
+3. Run `vault pair --name 'Store review client'`. In the Vault PWA, connect the displayed code as a Requesting client. Follow the published signing-device setup guide to pair a separate agent configuration and provide its HTTPS endpoint. A reviewer may run client and agent on the same physical computer with separate configurations. Pin that signing agent on the client with `vault agent configure`.
+4. Run `vault browser-wallet install`, then `vault browser-wallet doctor`. The doctor output includes status and public metadata only. Use the Web Store extension package being reviewed. Its ID must match the host's allowed origin, as documented in README.md here.
+5. Open a normal Ethereum dApp and select Grexie Vault. Approve the website connection in the PWA, choosing the disposable test identity. Verify the address is invisible before connection, visible afterwards, and removed after revocation in Settings → Connected websites.
+6. Request personal_sign or EIP-712 typed data. Verify the website waits, the PWA shows the website/method/exact message/hash, rejection returns a provider error, and approval returns a signature. No private key goes to the extension.
+7. To test transactions, use a local Anvil chain with disposable funds. Adding a literal-loopback development RPC requires explicit network approval. `eth_signTransaction` returns raw signed bytes without broadcasting. `eth_sendTransaction` explicitly requests sign-and-submit approval and returns the submitted transaction hash.
+8. Full reproducible automation is available: `npm ci`, `make build`, start disposable MongoDB on 127.0.0.1:27028, then `VAULT_WALLET_ONLY=1 node scripts/vault-browser-smoke.mjs`. It runs the real extension/native host/cloud/separate agent with a virtual test passkey, Anvil funds and a generated token contract. It tests rejection, signing, submission, account/chain switching, revocation, Chrome restart and another EIP-6963 wallet simultaneously. This fixture uses no production credentials.
+
+The setup and wallet guides explain installation, removal, permissions and trust boundaries. Support: https://github.com/grexie/vault/issues.
