@@ -27,6 +27,31 @@ func securityReviewPublicKey(t *testing.T) string {
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
 }
 
+func TestManagedSSHRetainsNativeVaultHostWithoutApprovalHooks(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	dir := filepath.Join(home, ".ssh")
+	os.MkdirAll(dir, 0700)
+	os.WriteFile(filepath.Join(dir, "config"), []byte("Include vault-agent.conf\nHost *\n ServerAliveInterval 30\n"), 0600)
+	os.WriteFile(filepath.Join(dir, "vault-agent.conf"), []byte("Match !final originalhost fixture exec \"false\"\n IdentityAgent SSH_AUTH_SOCK\nMatch !final originalhost fixture !exec \"false\"\n ProxyCommand false\nHost fixture\n HostName 127.0.0.9\n User fixture-user\n IdentityAgent /tmp/wrong.sock\nMatch all\n"), 0600)
+	path, err := prepareManagedSSH(root, home, filepath.Join(root, "system"), "/tmp/approved.sock", securityReviewPublicKey(t), []string{"fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("ssh", "-G", "-F", path, "fixture").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"hostname 127.0.0.9\n", "user fixture-user\n", "identityagent /tmp/approved.sock\n", "serveraliveinterval 30\n"} {
+		if !strings.Contains(string(out), expected) {
+			t.Fatalf("missing preserved setting %q", expected)
+		}
+	}
+	if strings.Contains(string(out), "proxycommand false") {
+		t.Fatal("wrapper executed native approval hooks")
+	}
+}
+
 func TestSecurityReviewManagedSSHRejectsIdentityOverrides(t *testing.T) {
 	public := securityReviewPublicKey(t)
 	for name, args := range map[string][]string{

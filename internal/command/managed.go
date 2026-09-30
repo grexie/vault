@@ -30,9 +30,10 @@ import (
 var managedSession = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 
 type savedSession struct {
-	Config   string         `json:"config"`
-	Endpoint string         `json:"endpoint"`
-	Pending  device.Pending `json:"pending"`
+	Config        string            `json:"config"`
+	Endpoint      string            `json:"endpoint"`
+	Pending       device.Pending    `json:"pending"`
+	Authorization *vaultwire.Signed `json:"authorization,omitempty"`
 }
 
 func managedSettings(o *vaultOptions, c *device.Client) {
@@ -72,6 +73,13 @@ func readManaged(o vaultOptions) (savedSession, error) {
 	return s, e
 }
 func managedSocket(s savedSession) (string, error) {
+	dir, e := managedRuntimeDir()
+	if e != nil {
+		return "", e
+	}
+	return filepath.Join(dir, "ssh-"+vaultwire.Digest([]byte(s.Config + ":" + s.Pending.Request.ID))[:24]+".sock"), nil
+}
+func managedRuntimeDir() (string, error) {
 	dir := fmt.Sprintf("/tmp/grexie-vault-%d", os.Getuid())
 	if e := os.Mkdir(dir, 0700); e != nil && !os.IsExist(e) {
 		return "", e
@@ -84,7 +92,7 @@ func managedSocket(s savedSession) (string, error) {
 	if !ok || stat.Uid != uint32(os.Getuid()) || !st.IsDir() || st.Mode().Perm() != 0700 {
 		return "", errors.New("unsafe socket directory")
 	}
-	return filepath.Join(dir, "ssh-"+vaultwire.Digest([]byte(s.Config + ":" + s.Pending.Request.ID))[:24]+".sock"), nil
+	return dir, nil
 }
 func managedCommand(ctx context.Context, o vaultOptions, cmd string, args []string) error {
 	if cmd == "agent" {
@@ -156,7 +164,7 @@ func managedCommand(ctx context.Context, o vaultOptions, cmd string, args []stri
 		if e != nil {
 			return e
 		}
-		s := savedSession{o.Config, o.AgentURL, p}
+		s := savedSession{Config: o.Config, Endpoint: o.AgentURL, Pending: p}
 		raw, _ := json.Marshal(s)
 		if e = device.SavePrivate(file, raw); e != nil {
 			c.CloseRequest(p.Request.ID)
@@ -196,6 +204,9 @@ func managedCommand(ctx context.Context, o vaultOptions, cmd string, args []stri
 	return errors.New("unknown managed command")
 }
 func waitManaged(ctx context.Context, o vaultOptions, c *device.Client, s savedSession) error {
+	return waitManagedOutput(ctx, o, c, s, os.Stdout)
+}
+func waitManagedOutput(ctx context.Context, o vaultOptions, c *device.Client, s savedSession, output io.Writer) error {
 	if o.Timeout < time.Second || o.Timeout > 15*time.Minute {
 		return errors.New("approval timeout must be 1s to 15m")
 	}
@@ -220,7 +231,7 @@ func waitManaged(ctx context.Context, o vaultOptions, c *device.Client, s savedS
 		return e
 	}
 	if s.Pending.Request.Kind == "age" {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"session": s.Pending.Request.Session, "status": "approved", "expiresAt": state.ExpiresAt})
+		return json.NewEncoder(output).Encode(map[string]any{"session": s.Pending.Request.Session, "status": "approved", "expiresAt": state.ExpiresAt})
 	}
 	socket, e := managedSocket(s)
 	if e != nil {
@@ -228,7 +239,7 @@ func waitManaged(ctx context.Context, o vaultOptions, c *device.Client, s savedS
 	}
 	if conn, e := net.DialTimeout("unix", socket, time.Second); e == nil {
 		conn.Close()
-		fmt.Fprintln(os.Stdout, socket)
+		fmt.Fprintln(output, socket)
 		return nil
 	}
 	if _, e = os.Lstat(socket); e == nil {
@@ -253,7 +264,7 @@ func waitManaged(ctx context.Context, o vaultOptions, c *device.Client, s savedS
 		conn, e := net.DialTimeout("unix", socket, 100*time.Millisecond)
 		if e == nil {
 			conn.Close()
-			fmt.Fprintln(os.Stdout, socket)
+			fmt.Fprintln(output, socket)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -440,7 +451,7 @@ func managedSSH(ctx context.Context, o vaultOptions, cmd string, args []string) 
 		return e
 	}
 	defer c.CloseRequest(p.Request.ID)
-	s := savedSession{o.Config, o.AgentURL, p}
+	s := savedSession{Config: o.Config, Endpoint: o.AgentURL, Pending: p}
 	file, e := managedFile(o)
 	if e != nil {
 		return e

@@ -356,6 +356,8 @@ func usage() {
   wait        --session NAME [--timeout 10m] (prints the caller-local socket)
   status      --session NAME (safe for polling)
   revoke      --session NAME
+  ensure      --session NAME --identity NAME --reason TEXT [--inherit-socket]
+  ssh-config  --host ALIAS --identity NAME --session NAME --reason TEXT --duration 15m
   ssh | scp   Native arguments; --identity and --reason precede the command
   encrypt     [-r PUBLIC_RECIPIENT] [--armor] [-o OUTPUT] [INPUT]
   decrypt     [--reason TEXT | --session NAME] [-o OUTPUT] [INPUT]

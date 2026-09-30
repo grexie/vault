@@ -65,6 +65,8 @@ func prepareManagedSSH(dir, home, systemConfig, socket, public string, args []st
 		defer f.Close()
 		scan := bufio.NewScanner(f)
 		scan.Buffer(make([]byte, 4096), 128*1024)
+		vaultHooks := filepath.Base(path) == "vault-agent.conf"
+		inHook := false
 		for scan.Scan() {
 			line := scan.Text()
 			total += len(line)
@@ -80,6 +82,21 @@ func prepareManagedSSH(dir, home, systemConfig, socket, public string, args []st
 				continue
 			}
 			key := strings.ToLower(fields[0])
+			if vaultHooks {
+				if key == "match" {
+					inHook = true
+					if len(fields) == 2 && strings.EqualFold(fields[1], "all") {
+						config.WriteString("Match all\n")
+					}
+					continue
+				}
+				if key == "host" {
+					inHook = false
+				}
+				if inHook {
+					continue
+				}
+			}
 			if protectedSSH[key] {
 				continue
 			}

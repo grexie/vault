@@ -25,6 +25,31 @@ Global options (`--identity`, `--reason`, `--config`, `--agent`, `--agent-url`, 
 
 ## SSH and SCP
 
+For ordinary `ssh HOST` and `scp`, generate Vault's native approval rules on each paired requesting device. Use the installed **Vault** binary, not the legacy Remote SSH Agent binary. Each alias needs a distinct session and a meaningful justification:
+
+```sh
+umask 077
+vault ssh-config --host work-server --hostname server.example.com \
+  --identity work --session ssh-work-server \
+  --reason 'SSH/SCP access to work-server from this device' --duration 15m \
+  > ~/.ssh/vault-agent.conf
+```
+
+Add this at the beginning of `~/.ssh/config`, before broader `Host` rules:
+
+```sshconfig
+Include ~/.ssh/vault-agent.conf
+
+Host work-server
+    User deploy
+```
+
+Generate additional aliases into the same included file using `>>`, without duplicating existing aliases. Preserve host, user, port and ProxyJump settings. Remove the old `remote-agent.conf` include when migrating. Remove active private `IdentityFile`/`CertificateFile` entries from all applicable user/system rules: OpenSSH treats these as additive, so `IdentityFile none` alone cannot cancel them. Preserve the original key files and Keychain entries; disable automatic key loading, password fallback, agent forwarding and ControlMaster reuse. The generated rules already set those protections. Inspect `ssh -G HOST` with care: it evaluates the approval hooks too.
+
+A native connection waits for approval, then reuses the matching host lease until it expires or is revoked. The device, identity, signing agent, justification and duration must match; reuse never extends expiry. `vault revoke --session ssh-work-server` closes that lease. Closing SSH does not revoke a shared host lease. A later connection can request fresh approval. The stable host path points to a separate socket for each approved request; the remote signing device communicates over HTTPS.
+
+Reserve generated `ssh-HOST` session names for the native hooks; do not run manual `request`/`wait` concurrently using those same names. For agent work, prefer a scoped task lease below and export its returned `SSH_AUTH_SOCK` before native SSH/SCP. The hooks authenticate that inherited Vault session instead of asking for a second host approval. A stale, revoked, mismatched or legacy inherited socket stops the connection; never unset it to bypass a denial. Native SSH command-line overrides can bypass local configuration, so this is a client workflow, not server-side restriction of the key.
+
 For one command, use the automatic one-shot wrappers:
 
 ```sh

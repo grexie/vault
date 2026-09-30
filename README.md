@@ -37,6 +37,8 @@ vault status --session deploy-review
 vault revoke --session deploy-review
 ```
 
+For native `ssh HOST` and `scp`, use `vault ssh-config` and include its generated rules before other SSH settings. The [public skill](SKILL.md#ssh-and-scp) has the exact setup, migration and revocation commands. Native host leases reuse approval until expiry without extending it.
+
 `wait` prints only the SSH socket path to stdout. Bind both `SSH_AUTH_SOCK` and `ssh -o IdentityAgent=...` when using it directly. The `ssh`/`scp` wrappers handle a temporary public-key-only SSH configuration and revoke their own request at exit. An existing SSH connection can outlive revocation.
 
 ## Documents and familiar tools

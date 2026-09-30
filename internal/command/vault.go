@@ -31,7 +31,7 @@ func newVaultCommand(ctx context.Context, args []string) (bool, error) {
 	recognized := func(s string) bool {
 		if !strings.Contains(filepath.Base(os.Args[0]), "remote-ssh-agent") {
 			switch s {
-			case "request", "wait", "status", "revoke", "encrypt", "decrypt":
+			case "request", "wait", "status", "revoke", "encrypt", "decrypt", "ensure", "ssh-config", "_ssh-inherited":
 				return true
 			}
 		}
@@ -69,6 +69,8 @@ func newVaultCommand(ctx context.Context, args []string) (bool, error) {
 	}
 	cmd, tail := rest[0], rest[1:]
 	switch cmd {
+	case "ensure", "ssh-config", "_ssh-inherited":
+		return true, nativeSSHCommand(ctx, o, cmd, tail)
 	case "agent", "_device-bridge", "request", "wait", "status", "revoke", "ssh", "scp", "encrypt", "decrypt":
 		return true, managedCommand(ctx, o, cmd, tail)
 	case "sign":

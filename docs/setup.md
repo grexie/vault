@@ -37,6 +37,10 @@ Provide HTTPS on that **user-controlled device**. For a Tailscale installation, 
 
 The cloud server and signing daemon are separate roles of one binary. Do not run a customer's signing agent on the public Grexie service.
 
+## Native SSH and SCP
+
+Use `vault ssh-config --host ALIAS --identity NAME --session ssh-ALIAS --reason TEXT --duration 15m` on each paired client. Save its output as `~/.ssh/vault-agent.conf` and include that file before broader host rules. Follow the [skill’s complete SSH configuration example](../SKILL.md#ssh-and-scp), including removal of additive private-key fallback and the retired include. Host rules preserve normal SSH arguments and jump hosts; approval failure blocks transport. An explicitly inherited Vault task socket is verified before use. Native host leases expire or can be revoked with `vault revoke --session ssh-ALIAS`.
+
 ## Host the cloud service
 
 Use an HTTPS origin with a stable hostname. Passkeys are bound to that hostname and do not migrate from another origin. Put the service behind a TLS reverse proxy and configure the exact external origin.

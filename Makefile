@@ -14,7 +14,7 @@ assets:
 
 test: build
 	go test -race ./...
-	node --test web/crypto.test.js web/vault/sw.test.js web/vault/identity-names.test.js
+	node --test web/crypto.test.js web/vault/sw.test.js web/vault/identity-names.test.js web/vault/request-time.test.js
 
 check:
 	go vet ./...
