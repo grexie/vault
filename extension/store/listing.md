@@ -53,6 +53,8 @@ Remote code: No. All JavaScript executed by the extension is included in the pac
 
 ## Data disclosures
 
-Disclose financial information (public wallet addresses, balances, transaction requests/results), website activity (origin required for permissions), user-provided content (messages/typed data submitted for signing), and authentication information (signature results that a website may use for login). Identity labels can be user names or other identifiers, so disclose personally identifiable information when selecting dashboard categories. These are handled for the wallet's single purpose even if processed only locally. Do not claim that the extension handles no user data.
+Dashboard selections: personally identifiable information (identity labels); financial and payment information (public wallet addresses, balances, transaction requests/results); authentication information (signature results used for login); web history (connected/requesting origins); website content (messages/typed data submitted for signing); user activity (wallet operations, statuses and last-use timestamps); location (source IP/network metadata handled by the configured service and RPC providers).
+
+These are handled for the wallet's single purpose even if processed only locally. Location does not mean GPS or geographic tracking. User activity does not mean recording unrelated network traffic, clicks, mouse movements, scrolling or keystrokes. There is no health-record or email/chat/SMS collection feature. Do not claim that the extension handles no user data.
 
 No sale of user data; no advertising; no unrelated use or transfer; no creditworthiness or lending use. The public privacy notice describes actual processing and storage. Confirm current dashboard wording against that notice before certification.

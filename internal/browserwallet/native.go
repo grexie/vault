@@ -21,7 +21,7 @@ const HostName = "com.grexie.vault"
 
 // ExtensionID is derived from the public manifest key shipped in extension/.
 // The corresponding private key is not needed by an unpacked installation.
-const ExtensionID = "kocbneijhmklhomjnmjaopgdpciamann"
+const ExtensionID = "jnjnmonlljgchklmkpcnhflbmmggaicj"
 
 type NativeRequest struct {
 	ID     string          `json:"id"`

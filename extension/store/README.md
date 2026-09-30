@@ -1,6 +1,6 @@
 # Chrome Web Store publication
 
-The listing copy, disclosures, reviewer instructions and graphics are maintained here. The store upload is the release's `grexie-vault_VERSION_chrome.zip`, containing the built extension files and license. Do not upload this directory as the extension.
+The listing copy, disclosures, reviewer instructions and graphics are maintained here. Build the extension with `node scripts/build-wallet-extension.mjs`, then run `python3 scripts/package-wallet-store.py .local/grexie-vault-store.zip` for the Store upload. This includes only built extension files and the license, and omits the development `key` field required to be absent by the Store. Release `_chrome.zip` archives retain that public key so unpacked installations have the same ID. Do not upload this directory as the extension.
 
 Before first publication:
 
@@ -11,6 +11,6 @@ Before first publication:
 5. Submit for review. A submitted or approved draft is not a published listing. Record the actual item URL and status; do not invent a store URL from the development ID.
 6. Once the item is published and its listing is accessible, change the installation page's primary button to the real store URL and lead with Add to Chrome. Retain CLI/native setup instructions: a website cannot install the native binary. Verify extension installation, native messaging and an owner-approved wallet flow from the published item.
 
-Current source-build ID before store assignment: kocbneijhmklhomjnmjaopgdpciamann. No Web Store item is claimed by this file.
+The Grexie publisher's Store item ID is `jnjnmonlljgchklmkpcnhflbmmggaicj`. The public key copied from its Package page fixes this same ID for source builds and the CLI's exact native host allowlist. This replaces the development-only ID used in preview.8. Use preview.9 or newer and rerun `vault browser-wallet install` when updating from that preview. Creating a Store draft does not make the extension available for installation; Google review and publication are still required.
 
 Official references: https://developer.chrome.com/docs/webstore/publish/ and https://developer.chrome.com/docs/extensions/reference/manifest/key.
