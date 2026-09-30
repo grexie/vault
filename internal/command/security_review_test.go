@@ -32,8 +32,8 @@ func TestManagedSSHRetainsNativeVaultHostWithoutApprovalHooks(t *testing.T) {
 	home := filepath.Join(root, "home")
 	dir := filepath.Join(home, ".ssh")
 	os.MkdirAll(dir, 0700)
-	os.WriteFile(filepath.Join(dir, "config"), []byte("Include vault-agent.conf\nHost *\n ServerAliveInterval 30\n"), 0600)
-	os.WriteFile(filepath.Join(dir, "vault-agent.conf"), []byte("Match !final originalhost fixture exec \"false\"\n IdentityAgent SSH_AUTH_SOCK\nMatch !final originalhost fixture !exec \"false\"\n ProxyCommand false\nHost fixture\n HostName 127.0.0.9\n User fixture-user\n IdentityAgent /tmp/wrong.sock\nMatch all\n"), 0600)
+	os.WriteFile(filepath.Join(dir, "config"), []byte("Include vault-agent.conf\n Port 2222\nHost *\n ServerAliveInterval 30\n"), 0600)
+	os.WriteFile(filepath.Join(dir, "vault-agent.conf"), []byte("Match !final originalhost fixture exec \"false\"\n IdentityAgent SSH_AUTH_SOCK\nMatch !final originalhost fixture !exec \"false\"\n ProxyCommand false\nHost fixture\n HostName 127.0.0.9\n User fixture-user\n IdentityAgent /tmp/wrong.sock\nMatch all # restore caller scope\n"), 0600)
 	path, err := prepareManagedSSH(root, home, filepath.Join(root, "system"), "/tmp/approved.sock", securityReviewPublicKey(t), []string{"fixture"})
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestManagedSSHRetainsNativeVaultHostWithoutApprovalHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"hostname 127.0.0.9\n", "user fixture-user\n", "identityagent /tmp/approved.sock\n", "serveraliveinterval 30\n"} {
+	for _, expected := range []string{"hostname 127.0.0.9\n", "user fixture-user\n", "identityagent /tmp/approved.sock\n", "serveraliveinterval 30\n", "port 2222\n"} {
 		if !strings.Contains(string(out), expected) {
 			t.Fatalf("missing preserved setting %q", expected)
 		}

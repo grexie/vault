@@ -85,7 +85,7 @@ func prepareManagedSSH(dir, home, systemConfig, socket, public string, args []st
 			if vaultHooks {
 				if key == "match" {
 					inHook = true
-					if len(fields) == 2 && strings.EqualFold(fields[1], "all") {
+					if len(fields) >= 2 && strings.EqualFold(fields[1], "all") && (len(fields) == 2 || strings.HasPrefix(fields[2], "#")) {
 						config.WriteString("Match all\n")
 					}
 					continue
