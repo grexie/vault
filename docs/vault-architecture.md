@@ -53,3 +53,15 @@ Autofill binds an origin and document token, checks visible field roles again, a
 Password backups use fixed bounded Argon2id parameters (64 MiB, three passes) and AES-256-GCM. Decryption, validation and conflict preview happen locally. Wrong passwords/corruption fail before merging. Exports omit cookies, live leases, device tokens and local CVVs. Public account or operator assistance cannot reconstruct lost user encryption material.
 
 Run one cloud replica with per-device rate limits, serialized active-request admission, bounded push workers and generic notification text. HTTP/TLS ingress, host security, MongoDB authentication, backup retention and monitoring remain operator responsibilities. Read the review's findings and test evidence; passing tests are not a professional security audit.
+
+## Web3 wallet and Hyperliquid
+
+The Chrome MV3 extension is an additional requesting interface, not another custodian. An isolated content script relays provider requests to its worker. Chrome authenticates the caller to a fixed native-messaging host; the worker obtains the top-level origin from Chrome's sender metadata. The Go host reads the paired client's owner-signed public catalogue, persists local chain metadata and sends encrypted requests through the existing broker to the pinned signing device. It opens no localhost port.
+
+Website connection and chain-control approvals use `wallet-connect`. Their owner-signed results carry an origin/device-bound identity permission, chain set and timestamps; the public catalogue carries the same grant. Local state contains network preferences, last-use timestamps and revocation tombstones, not keys. PWA revocation republishes the catalogue and revokes pending requests for the affected origin. Chrome polls the signed state and emits account changes.
+
+Each `wallet-sign` request commits the origin, identity ID/name/address, method, chain, exact normalized payload, submit flag and transaction RPC URL. The browser worker and Go signer independently validate this binding. The agent releases one signature and clears that one-shot approval. Message signatures use an exact EIP-191 or EIP-712 digest. Transactions use the existing Ethereum normalizer and signed-byte verifier. Only the local bridge may submit an `eth_sendTransaction`, after exact sign-and-submit approval and another grant/chain check. The cloud and signing daemon never broadcast.
+
+The `hyperliquid` CLI shares this remote-signing path but uses its own typed action schema and network binding. It returns a verified signed exchange envelope. Public balance, position and order queries use only the official info endpoint and need no approval. Hyperliquid browser terms use the generic EIP-712 wallet path; creating an external trading API key remains a distinct authority grant.
+
+See [Chrome wallet](browser-wallet.md) and [Hyperliquid](hyperliquid.md) for protocol compatibility, installation, failure behavior and tests.

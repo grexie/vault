@@ -11,4 +11,4 @@ playwright-report
 .env
 secrets
 .env.*
-web/static/wasm_exec 2.js
+web/static/wasm_exec [0-9]*.js

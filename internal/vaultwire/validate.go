@@ -14,6 +14,14 @@ func ValidateRequest(q Request) error {
 	switch q.Kind {
 	case "ssh", "age":
 		valid = q.IdentityType == "ssh" && q.Managed
+	case "wallet-connect":
+		var control WalletControl
+		valid = q.IdentityType == "ethereum" && !q.Managed && q.AgentID == q.DeviceID && json.Unmarshal(q.Payload, &control) == nil && control.Validate() == nil
+	case "wallet-sign":
+		_, e := WalletChainID(q.Network)
+		valid = q.IdentityType == "ethereum" && q.Managed && q.Duration == 60 && e == nil
+	case "hyperliquid":
+		valid = q.IdentityType == "ethereum" && q.Managed && (q.Network == "mainnet" || q.Network == "testnet") && q.Duration == 60
 	case "ethereum", "bitcoin":
 		valid = q.IdentityType == q.Kind && q.Managed
 	case "create":

@@ -17,7 +17,7 @@ All identities stay browser-encrypted in the hosted store. Signing keys go only 
 
 ## Installation and pairing
 
-Build the public repository with `make build` and install `bin/vault` (Go 1.26.8). Avoid clobbering HashiCorp Vault if installed; use the explicit binary path. Read the repository setup and architecture documents. Cloud configuration uses HTTPS plus a local 32-byte storage-key file and separate MongoDB URI file; never invent or commit deployment secrets.
+Build the public repository with `npm ci && make build` and install `bin/vault` (Go 1.26.8 and Node.js 22+). Avoid clobbering HashiCorp Vault if installed; use the explicit binary path. Read the repository setup and architecture documents. Cloud configuration uses HTTPS plus a local 32-byte storage-key file and separate MongoDB URI file; never invent or commit deployment secrets.
 
 Run `vault pair --name DEVICE` for a requesting client. The user pastes the code into the app's Connected devices form and approves with a passkey. A trusted signing device has a separate private config: `vault --config AGENT_CONFIG pair --role agent --name SIGNER`, then `vault --config AGENT_CONFIG agent serve`. HTTPS/Tailscale forwards to its loopback port 8792. Use `agent info` for its public ID and `vault agent configure --id ID --url HTTPS_ORIGIN` on requesting clients.
 
@@ -106,3 +106,15 @@ Explicit Chrome/Safari password migration is site-scoped: `vault import chrome -
 For vanilla Foundry, use `vault ... foundry --rpc-url URL --address ADDRESS --chain-id ID -- cast/forge ... --unlocked`. Only explicit `--broadcast` enables caller-side submission, and the user must authorize the transaction. Never handle real funds during a verification-only task.
 
 Backups are password-encrypted in the browser. Keep the password separately. Do not promise recovery after loss of the passkey and all backups. Shared-owner flows are not released yet; threshold library tests are not permission to use experimental keys for funds. Existing legacy CI grants are documented separately and are not silently migrated to cloud identities.
+
+## Web3 websites and Hyperliquid
+
+Run `vault browser-wallet install` on the paired requesting machine and load the bundled Chrome extension as described in `docs/browser-wallet.md`. Use `vault browser-wallet doctor` to check pairing, catalogue, signer, cloud, chains and native integration. Chrome starts the bridge automatically; do not configure a network listener or export keys to an extension. Select **Grexie Vault** in a site's normal wallet selector. Browser agents use the same DOM flow as a person; no special agent API is needed.
+
+Connecting a wallet shares a public address with that exact origin. **Wallet connection is not authorization to sign or transact.** Neither a previous signature, an approved connection nor a previous transaction authorizes another operation. Each request requires the user's authorization for its purpose and a separate exact-payload approval in Vault. Wait for approval elsewhere; never click through a dangerous action on the assumption that the connected account permits it. Do not switch identities to evade a rejection.
+
+The popup's Change identity asks for a new connection approval in Vault. Sites can propose or switch EVM networks, each with review. `eth_signTransaction` signs only. `eth_sendTransaction` requests explicit sign-and-submit consent and the local bridge submits the exact approved transaction to its approved RPC. Private keys stay out of Chrome, websites and agent tools. An API-wallet delegation, token allowance or builder fee may confer lasting external authority; explain and obtain authorization for that effect.
+
+`vault --identity NAME hyperliquid balance|positions|orders` uses the public catalogue and official info endpoint without private-key approval. `--address ADDRESS` can inspect a public account directly; `--network testnet` selects testnet and `--dex native|NAME` narrows perpetual DEXs. Default reads include all perpetual DEXs. Do not add unified-account spot and perpetual cash figures together.
+
+`vault --identity NAME --reason TEXT hyperliquid sign --network mainnet|testnet` reads one action envelope from stdin, requests fresh approval and outputs a signed envelope. It never submits. `hyperliquid review --address ADDRESS --network NETWORK` decodes it without signing. Do not log signatures or message bodies unnecessarily. A signing approval does not by itself authorize sending the result to the exchange. Browser login can require EIP-712 terms acceptance; it does not authorize trading enablement, API-wallet delegation, orders or transfers.

@@ -36,7 +36,7 @@ func newVaultCommand(ctx context.Context, args []string) (bool, error) {
 			}
 		}
 		switch s {
-		case "agent", "_device-bridge", "ssh", "scp", "pair", "provider", "import", "identity", "run", "aws", "gh", "github", "docker", "cloudflare", "wrangler", "autofill", "browser", "card-cvv", "api", "keychain", "sign", "foundry":
+		case "agent", "_device-bridge", "ssh", "scp", "pair", "provider", "import", "identity", "run", "aws", "gh", "github", "docker", "cloudflare", "wrangler", "autofill", "browser", "card-cvv", "api", "keychain", "sign", "foundry", "hyperliquid", "browser-wallet":
 			return true
 		}
 		return false
@@ -73,6 +73,10 @@ func newVaultCommand(ctx context.Context, args []string) (bool, error) {
 		return true, nativeSSHCommand(ctx, o, cmd, tail)
 	case "agent", "_device-bridge", "request", "wait", "status", "revoke", "ssh", "scp", "encrypt", "decrypt":
 		return true, managedCommand(ctx, o, cmd, tail)
+	case "browser-wallet":
+		return true, browserWalletCommand(ctx, o, tail)
+	case "hyperliquid":
+		return true, hyperliquidVault(ctx, o, tail)
 	case "sign":
 		return true, signVault(ctx, o, tail)
 	case "foundry":

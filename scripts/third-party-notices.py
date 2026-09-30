@@ -64,12 +64,17 @@ Grexie Vault's own source is released under the [MIT license](LICENSE). Dependen
 
 The go-ethereum library is licensed under LGPL-3.0 (with individual files and bundled components retaining their stated licenses). Both the LGPL and GPL texts are included below. Vault does not restrict reverse engineering needed to debug modifications to those components. The full application build sources, pinned dependency versions and checksums, and scripts are public. Releases include a corresponding-source archive with vendored Go dependencies alongside the binaries so the combined application and browser worker can be rebuilt with a modified library.
 
-Use Go 1.26.8, unpack the source archive, then run `GOFLAGS=-mod=vendor make build VERSION=local`. Native macOS Keychain support additionally uses the system Apple Security framework and a C toolchain. Rebuilding `make assets` regenerates the browser WebAssembly; `go build ./cmd/vault` embeds those assets into the server. Upstream module sources are also available using `go mod download` with the pinned `go.mod` and `go.sum` files.
+Use Go 1.26.8 and Node.js 22+, unpack the source archive, run `npm ci`, then `GOFLAGS=-mod=vendor make build VERSION=local`. Native macOS Keychain support additionally uses the system Apple Security framework and a C toolchain. Rebuilding `make assets` regenerates the browser WebAssembly; `go build ./cmd/vault` embeds those assets into the server. Upstream module sources are also available using `go mod download` with the pinned `go.mod` and `go.sum` files.
 
 Regenerate this inventory with `python3 scripts/third-party-notices.py` after changing dependencies. A license file in this inventory may cover other packages in that module that are not linked by Vault.
 
 | Module | Version | License and notice files |
 | --- | --- | --- |
 '''
-(ROOT / 'THIRD_PARTY_NOTICES.md').write_text(notice + '\n'.join(rows) + '\n')
+(ROOT / 'THIRD_PARTY_NOTICES.md').write_text(notice + '\n'.join(rows) + '''
+
+## Chrome extension and test tooling
+
+The extension runtime is original MIT-licensed TypeScript with no bundled third-party JavaScript runtime. Its esbuild/TypeScript build and Playwright/Anvil/Solidity/Ethers test dependencies are pinned in package-lock.json; npm publishes their original licenses. Independent signature fixtures include their exact upstream license and generation dependencies in [walletsign testdata](internal/walletsign/testdata/README.md) and [Hyperliquid testdata](internal/hyperliquid/testdata/README.md). Go MsgPack notices above apply to the Hyperliquid signing implementation.
+''')
 print(f'Wrote notices for {len(modules)} modules plus the Go runtime.')

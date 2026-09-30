@@ -189,7 +189,7 @@ func (s *Server) submitRequest(w http.ResponseWriter, r *http.Request, d deviceR
 		return
 	}
 	switch q.Kind {
-	case "create", "lookup", "import", "ssh", "age", "ethereum", "bitcoin", "credentials", "api", "autofill", "keychain-import":
+	case "create", "lookup", "import", "ssh", "age", "ethereum", "bitcoin", "hyperliquid", "wallet-connect", "wallet-sign", "credentials", "api", "autofill", "keychain-import":
 	default:
 		fail(w, 400, "Unsupported request type")
 		return
@@ -399,7 +399,7 @@ func (s *Server) completeRequest(w http.ResponseWriter, r *http.Request, session
 	}
 	var spec vaultwire.Request
 	json.Unmarshal(q.Signed.Payload, &spec)
-	if spec.Kind != "create" && spec.Kind != "import" && spec.Kind != "lookup" && spec.Kind != "keychain-import" {
+	if spec.Kind != "create" && spec.Kind != "import" && spec.Kind != "lookup" && spec.Kind != "keychain-import" && spec.Kind != "wallet-connect" {
 		fail(w, 400, "Request requires an encrypted approval")
 		return
 	}

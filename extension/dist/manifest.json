@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "Grexie Vault",
+  "version": "0.3.0",
+  "description": "Your Vault identities in Web3. Private keys stay on your signing device.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvVLErgpNUUY1UO/Y5QTt+L8dLhNDTimzTwvJUIcUa2KJCnmt8jsM9OutpZYV5ad+v31K90eBta6POtjFzVkiD2wHgVdibOhb85m6+22EAqLU5yEpeK4mw4gJp+JrKYC1PRHwI5DNIs1a1w3QTy0AgNTHoBmKVVI0XVH86cMysBoEZWp5cdpmSv3QVJVI3QuLBcayhnxHNW+k/R1S4TXs+Y4sE/2uWInkuppWPM73NLT9v7lnYxNOR6XUG2bLnlE3izP8z2nD5f7jFPZONq+V3zM9qFr9DCv2X7ET4B8+YULGHp/cvTS8xRNunU5iDUeGASMTXvNkrMU0V9BiVXI4BQIDAQAB",
+  "permissions": [
+    "nativeMessaging",
+    "activeTab"
+  ],
+  "background": {
+    "service_worker": "worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "32": "icon-32.png",
+      "128": "icon-128.png"
+    }
+  },
+  "icons": {
+    "32": "icon-32.png",
+    "128": "icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "provider.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://*/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  }
+}

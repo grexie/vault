@@ -37,3 +37,13 @@ Password-encrypted backups contain identity material, not session cookies or dev
 The retained Remote SSH Agent compatibility service has a different storage/session model and existing persistent CI grants. Its [security model](docs/remote-ssh-agent-security.md) and [guide](docs/remote-ssh-agent.md) remain separate. No old key, pairing token or lease is automatically imported into the cloud app.
 
 Never include private keys, passwords, tokens, cookies, database URIs or decrypted backups in a public issue or security report. Use generated fixtures to reproduce a problem.
+
+## Chrome wallet
+
+The native-messaging host accepts only the fixed installed extension ID and exposes no HTTP/WebSocket listener. Chrome's worker binds calls to the actual top-level sender origin; page-provided origins and extension-private methods are rejected. The Go process independently checks catalogue permissions, the pinned identity and fresh operation-bound approval. Connection shares a public address, not a signing lease. Compromising the extension may produce deceptive requests, but does not bypass the independent PWA's passkey approval or obtain the signing key.
+
+Safe read RPC is an allowlist with deadlines, byte/rate limits, redirect refusal and DNS-pinned public addresses. Private, link-local, reserved and Tailscale/CGNAT targets are refused; literal loopback HTTP requires an explicitly approved development network. RPC metadata is immutable for an existing chain ID. A transaction's approved RPC destination and submission intent are part of its signed request. Signatures are independently verified before return or broadcast.
+
+All signed request envelopes use exact canonical field names and reject unknown fields, duplicate names, case aliases and trailing input before browser review or agent activation. This closes a JSON interpretation mismatch where JavaScript could review `payload` while Go accepted a later `Payload`. Typed-data reviews show only declared signed fields and warn about ignored metadata; v3/v4 and legacy-v1 semantics are kept distinct. A fully received malformed native request fails on its own rather than cancelling other sites' pending approvals.
+
+A signature can authorize effects outside Vault's lifetime: ERC-20 allowances, NFT operators, Hyperliquid API wallets and builder fees may persist until revoked at the destination protocol. Vault revocation cannot withdraw a signature that a caller or site already received. See the [wallet guide](docs/browser-wallet.md) and [Hyperliquid guide](docs/hyperliquid.md).

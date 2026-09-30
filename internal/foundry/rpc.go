@@ -301,26 +301,36 @@ func (a *Adapter) checkChain(ctx context.Context) error {
 	return nil
 }
 func (a *Adapter) prepare(ctx context.Context, raw []byte) ([]byte, error) {
+	return PrepareTransaction(ctx, a.cfg.Address, a.cfg.ChainID, raw, a.call)
+}
+
+// PrepareTransaction fills RPC quantities before approval. The same strict
+// transaction representation is reviewed by the browser and signed by the agent.
+func PrepareTransaction(ctx context.Context, address common.Address, chainID *big.Int, raw []byte, call func(context.Context, string, any, any) error) ([]byte, error) {
 	tx, err := identity.DecodeEthereum(raw)
 	if err != nil {
 		return nil, err
 	}
-	if tx.From != a.cfg.Address {
+	if tx.From != address {
 		return nil, errors.New("transaction sender does not match the selected identity")
 	}
 	if tx.Type != nil && *tx.Type > 2 {
 		return nil, errors.New("unsupported transaction type")
 	}
-	if err = a.checkChain(ctx); err != nil {
+	var actual hexutil.Big
+	if err = call(ctx, "eth_chainId", []any{}, &actual); err != nil {
 		return nil, err
 	}
-	if tx.ChainID != nil && (*big.Int)(tx.ChainID).Cmp(a.cfg.ChainID) != 0 {
+	if (*big.Int)(&actual).Cmp(chainID) != 0 {
+		return nil, errors.New("upstream chain mismatch")
+	}
+	if tx.ChainID != nil && (*big.Int)(tx.ChainID).Cmp(chainID) != 0 {
 		return nil, errors.New("transaction chain mismatch")
 	}
-	tx.ChainID = (*hexutil.Big)(new(big.Int).Set(a.cfg.ChainID))
+	tx.ChainID = (*hexutil.Big)(new(big.Int).Set(chainID))
 	if tx.Nonce == nil {
 		var n hexutil.Uint64
-		if err = a.call(ctx, "eth_getTransactionCount", []any{tx.From, "pending"}, &n); err != nil {
+		if err = call(ctx, "eth_getTransactionCount", []any{tx.From, "pending"}, &n); err != nil {
 			return nil, err
 		}
 		tx.Nonce = &n
@@ -328,7 +338,7 @@ func (a *Adapter) prepare(ctx context.Context, raw []byte) ([]byte, error) {
 	if tx.GasPrice == nil && tx.MaxFeePerGas == nil && tx.MaxPriorityFeePerGas == nil {
 		if tx.Type != nil && *tx.Type < 2 {
 			var p hexutil.Big
-			if err = a.call(ctx, "eth_gasPrice", []any{}, &p); err != nil {
+			if err = call(ctx, "eth_gasPrice", []any{}, &p); err != nil {
 				return nil, err
 			}
 			tx.GasPrice = &p
@@ -336,18 +346,18 @@ func (a *Adapter) prepare(ctx context.Context, raw []byte) ([]byte, error) {
 			var block struct {
 				BaseFee *hexutil.Big `json:"baseFeePerGas"`
 			}
-			if err = a.call(ctx, "eth_getBlockByNumber", []any{"latest", false}, &block); err != nil {
+			if err = call(ctx, "eth_getBlockByNumber", []any{"latest", false}, &block); err != nil {
 				return nil, err
 			}
 			if block.BaseFee == nil {
 				var p hexutil.Big
-				if err = a.call(ctx, "eth_gasPrice", []any{}, &p); err != nil {
+				if err = call(ctx, "eth_gasPrice", []any{}, &p); err != nil {
 					return nil, err
 				}
 				tx.GasPrice = &p
 			} else {
 				var tip hexutil.Big
-				if err = a.call(ctx, "eth_maxPriorityFeePerGas", []any{}, &tip); err != nil {
+				if err = call(ctx, "eth_maxPriorityFeePerGas", []any{}, &tip); err != nil {
 					return nil, err
 				}
 				fee := new(big.Int).Mul((*big.Int)(block.BaseFee), big.NewInt(2))
@@ -359,7 +369,7 @@ func (a *Adapter) prepare(ctx context.Context, raw []byte) ([]byte, error) {
 	}
 	if tx.Gas == nil {
 		var gas hexutil.Uint64
-		if err = a.call(ctx, "eth_estimateGas", []any{tx}, &gas); err != nil {
+		if err = call(ctx, "eth_estimateGas", []any{tx}, &gas); err != nil {
 			return nil, err
 		}
 		tx.Gas = &gas

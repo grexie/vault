@@ -18,9 +18,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - run: npm ci
       - run: make test check
       - if: runner.os == 'Linux'
         run: |
-          npm ci
           npx playwright install --with-deps chromium
           node scripts/browser-smoke.mjs
+          docker run -d --rm --name vault-wallet-test -p 127.0.0.1:27028:27017 mongo:8.2 --bind_ip_all
+          VAULT_WALLET_SMOKE=1 node scripts/vault-browser-smoke.mjs

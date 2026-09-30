@@ -12,10 +12,12 @@ import (
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/grexie/vault/internal/backup"
+	"github.com/grexie/vault/internal/hyperliquid"
 	"github.com/grexie/vault/internal/identity"
 	"github.com/grexie/vault/internal/provider"
 	"github.com/grexie/vault/internal/threshold"
 	"github.com/grexie/vault/internal/vaultwire"
+	"github.com/grexie/vault/internal/walletsign"
 )
 
 type input struct {
@@ -33,8 +35,8 @@ type input struct {
 func operation(in input) (any, error) {
 	switch in.Action {
 	case "validate-request":
-		var q vaultwire.Request
-		if json.Unmarshal([]byte(in.Data), &q) != nil {
+		q, decodeErr := vaultwire.DecodeRequest([]byte(in.Data))
+		if decodeErr != nil {
 			return nil, errors.New("invalid request")
 		}
 		return true, vaultwire.ValidateRequest(q)
@@ -54,6 +56,25 @@ func operation(in input) (any, error) {
 		return identity.Generate(in.Name, in.Type, in.Network)
 	case "import":
 		return identity.Import(in.Name, in.Type, in.Network, []byte(in.Key), []byte(in.Password))
+	case "review-wallet":
+		if e := walletsign.CheckBinding([]byte(in.Data), in.Name, in.Key, in.Network, in.PublicKey); e != nil {
+			return nil, e
+		}
+		return walletsign.Review([]byte(in.Data))
+	case "validate-wallet-control":
+		if _, e := walletsign.StrictJSON([]byte(in.Data)); e != nil {
+			return nil, e
+		}
+		var control vaultwire.WalletControl
+		if json.Unmarshal([]byte(in.Data), &control) != nil {
+			return nil, errors.New("invalid wallet control")
+		}
+		return control, control.Validate()
+	case "review-hyperliquid":
+		if e := hyperliquid.CheckBinding([]byte(in.Data), in.Network, in.PublicKey); e != nil {
+			return nil, e
+		}
+		return hyperliquid.Review([]byte(in.Data))
 	case "review-ethereum":
 		return identity.ReviewEthereum([]byte(in.Data))
 	case "decode-abi":

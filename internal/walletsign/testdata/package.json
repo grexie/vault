@@ -1,0 +1,1 @@
+{"name":"vault-offline-signature-reference","version":"1.0.0","private":true,"dependencies":{"@metamask/eth-sig-util":"9.0.0"}}

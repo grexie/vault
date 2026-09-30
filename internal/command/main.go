@@ -371,6 +371,8 @@ func usage() {
   autofill    --target ID --type login|payment-card (identity required)
   card-cvv    --stdin (identity required; device-local only)
   keychain    serve (local authorized-import service)
+  browser-wallet install|uninstall|status|serve|doctor
+  hyperliquid balance|positions|orders|review|sign --network mainnet|testnet
   sign        ethereum|bitcoin < TRANSACTION
   foundry     --rpc-url URL --address ADDRESS --chain-id ID [--broadcast] -- COMMAND
   cloud       Host the PWA and encrypted MongoDB service

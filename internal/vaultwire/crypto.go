@@ -85,6 +85,11 @@ func Verify(public []byte, domain string, s Signed, out any) error {
 	if !ecdsa.Verify(&ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, digest[:], new(big.Int).SetBytes(s.Signature[:32]), new(big.Int).SetBytes(s.Signature[32:])) {
 		return errors.New("message signature rejected")
 	}
+	if domain == "request" {
+		if _, e := DecodeRequest(s.Payload); e != nil {
+			return e
+		}
+	}
 	return json.Unmarshal(s.Payload, out)
 }
 func boxKey(secret, salt []byte, context string) (cipher.AEAD, error) {

@@ -6,6 +6,17 @@
     "test": "node --test web/crypto.test.js"
   },
   "devDependencies": {
-    "playwright": "1.62.1"
+    "@foundry-rs/anvil": "1.7.1",
+    "@types/chrome": "0.1.32",
+    "esbuild": "0.25.12",
+    "ethers": "6.17.0",
+    "playwright": "1.62.1",
+    "solc": "0.8.37",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "solc": {
+      "tmp": "0.2.7"
+    }
   }
 }

@@ -16,6 +16,7 @@ require (
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/taurusgroup/multi-party-sig v0.7.0-alpha-2025-01-28
+	github.com/tinylib/msgp v1.6.4
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78
 	go.etcd.io/bbolt v1.5.0
 	go.mongodb.org/mongo-driver/v2 v2.9.1
@@ -48,7 +49,6 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/supranational/blst v0.3.16 // indirect
-	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.2.0 // indirect

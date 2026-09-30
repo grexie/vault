@@ -289,7 +289,7 @@ func (c *Client) Submit(ctx context.Context, q vaultwire.Request) (Pending, erro
 	if e != nil {
 		return p, e
 	}
-	if !q.Managed && q.AgentID == q.DeviceID && q.Kind != "create" && q.Kind != "import" && q.Kind != "lookup" && q.Kind != "keychain-import" {
+	if !q.Managed && q.AgentID == q.DeviceID && q.Kind != "create" && q.Kind != "import" && q.Kind != "lookup" && q.Kind != "keychain-import" && q.Kind != "wallet-connect" {
 		key, e := vaultwire.NewKey()
 		if e != nil {
 			return p, e

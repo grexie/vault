@@ -20,9 +20,11 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 	"github.com/grexie/vault/internal/device"
+	"github.com/grexie/vault/internal/hyperliquid"
 	"github.com/grexie/vault/internal/identity"
 	"github.com/grexie/vault/internal/keyparse"
 	"github.com/grexie/vault/internal/vaultwire"
+	"github.com/grexie/vault/internal/walletsign"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -91,11 +93,11 @@ func (a *Agent) poll(ctx context.Context) {
 	defer a.mu.Unlock()
 	present := map[string]bool{}
 	for _, state := range inbox.Requests {
-		var q vaultwire.Request
-		if json.Unmarshal(state.Signed.Payload, &q) != nil || !q.Managed || q.AgentID != a.client.Config.Device.ID || state.ID != q.ID || !time.Now().Before(state.ExpiresAt) {
+		q, decodeErr := vaultwire.DecodeRequest(state.Signed.Payload)
+		if decodeErr != nil || !q.Managed || q.AgentID != a.client.Config.Device.ID || state.ID != q.ID || !time.Now().Before(state.ExpiresAt) {
 			continue
 		}
-		if q.Kind != "ssh" && q.Kind != "age" && q.Kind != "ethereum" && q.Kind != "bitcoin" {
+		if q.Kind != "ssh" && q.Kind != "age" && q.Kind != "ethereum" && q.Kind != "bitcoin" && q.Kind != "hyperliquid" && q.Kind != "wallet-sign" {
 			continue
 		}
 		present[q.ID] = true
@@ -318,6 +320,36 @@ func (l *lease) execute(q vaultwire.RPC) ([]byte, error) {
 			l.oneShotUsed = true
 		}
 		return age.DecryptHeader(q.Data, l.age)
+	case "wallet-sign":
+		if spec.Kind != "wallet-sign" || vaultwire.ValidateRequest(spec) != nil || !bytes.Equal(q.Data, spec.Payload) || l.oneShotUsed {
+			return nil, errors.New("wallet action differs from the approved one-shot request")
+		}
+		if e := walletsign.CheckBinding(q.Data, spec.Identity, l.approval.IdentityID, spec.Network, l.approval.PublicKey); e != nil {
+			return nil, e
+		}
+		l.oneShotUsed = true
+		k, e := identity.EthereumKey(l.approval.Secret)
+		if e != nil {
+			return nil, e
+		}
+		defer k.D.SetInt64(0)
+		defer clear(l.approval.Secret)
+		return walletsign.Sign(k, q.Data)
+	case "hyperliquid":
+		if spec.Kind != "hyperliquid" || vaultwire.ValidateRequest(spec) != nil || !bytes.Equal(q.Data, spec.Payload) || l.oneShotUsed {
+			return nil, errors.New("Hyperliquid action differs from the approved one-shot request")
+		}
+		if e := hyperliquid.CheckBinding(q.Data, spec.Network, l.approval.PublicKey); e != nil {
+			return nil, e
+		}
+		l.oneShotUsed = true
+		k, e := identity.EthereumKey(l.approval.Secret)
+		if e != nil {
+			return nil, e
+		}
+		defer k.D.SetInt64(0)
+		defer clear(l.approval.Secret)
+		return hyperliquid.Sign(k, q.Data)
 	case "ethereum":
 		if spec.Kind != "ethereum" || !bytes.Equal(q.Data, spec.Payload) || l.oneShotUsed {
 			return nil, errors.New("transaction differs from the approved request")

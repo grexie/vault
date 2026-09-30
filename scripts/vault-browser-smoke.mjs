@@ -6,6 +6,7 @@ import {join,resolve} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {createServer} from 'node:net';
 import assert from 'node:assert/strict';
+import {runWalletSmoke} from './wallet-extension-smoke.mjs';
 import {chromium} from 'playwright';
 const dir=await mkdtemp(join(tmpdir(),'vault-browser-'));
 const listener=createServer();await new Promise(r=>listener.listen(0,'127.0.0.1',r));const port=listener.address().port;await new Promise(r=>listener.close(r));
@@ -30,6 +31,10 @@ try{
  const agentListener=createServer();await new Promise(r=>agentListener.listen(0,'127.0.0.1',r));const agentPort=agentListener.address().port;await new Promise(r=>agentListener.close(r));const agentURL=`http://127.0.0.1:${agentPort}`;
  const daemon=cli(['agent','serve','--listen',`127.0.0.1:${agentPort}`],undefined,undefined,agentConfig);await until(()=>daemon.err.includes('Signing device ready'));
  const configure=cli(['agent','configure','--id',agentID,'--url',agentURL]);await configure.done;assert.equal(configure.code,0,configure.err);
+ const createWalletIdentity=async()=>{const c=cli(['--identity','Fixture alternate wallet','--reason','Create an isolated identity-switching fixture','identity','create','--type','ethereum']);await clickApproval(page);await c.done;assert.equal(c.code,0,c.err);return JSON.parse(c.out)};
+ if(process.env.VAULT_WALLET_ONLY==='1'){
+ const created=cli(['--identity','Fixture ETH','--reason','Generate a disposable Ethereum test identity','identity','create','--type','ethereum']);await clickApproval(page);await created.done;assert.equal(created.code,0,created.err);await runWalletSmoke({dir,exe,config,page,ethIdentity:JSON.parse(created.out),until,createIdentity:createWalletIdentity});assert.deepEqual(errors,[]);
+ }else{
  const createSSH=cli(['--identity','Fixture SSH','--reason','Generate a disposable SSH test identity','identity','create','--type','ssh']);await clickApproval(page);await createSSH.done;assert.equal(createSSH.code,0,createSSH.err);const sshIdentity=JSON.parse(createSSH.out);assert(sshIdentity.publicKey.startsWith('ssh-ed25519 '));
  const publicLookup=cli(['--identity','Fixture SSH','identity','lookup','--type','ssh']);await publicLookup.done;assert.equal(publicLookup.code,0,publicLookup.err);assert.equal(JSON.parse(publicLookup.out)[0].publicKey,sshIdentity.publicKey);
  const encrypted=cli(['--identity','Fixture SSH','encrypt','--armor'],'A disposable document for the age approval test.');await encrypted.done;assert.equal(encrypted.code,0,encrypted.err);
@@ -59,6 +64,7 @@ try{
  const transaction={from:ethIdentity.address,to:'0x0000000000000000000000000000000000000001',chainId:'0x7a69',nonce:'0x0',gas:'0x5208',gasPrice:'0x3b9aca00',value:'0x0'};
  const signature=cli(['--identity','Fixture ETH','--reason','Sign the requested zero-value fixture transaction without broadcasting','sign','ethereum'],JSON.stringify(transaction));await clickApproval(page);await signature.done;assert.equal(signature.code,0,signature.err);assert(/^0x[0-9a-f]+$/.test(signature.out.trim()));console.log('PASS: exact Ethereum transaction signed by separate agent, no private key returned to caller');
 
+ if(process.env.VAULT_WALLET_SMOKE==='1')await runWalletSmoke({dir,exe,config,page,ethIdentity,until,createIdentity:createWalletIdentity});
  const importer=cli(['--reason','Import the requested fixture GitHub token','import','github','--name','Fixture GitHub','--stdin'],JSON.stringify({provider:'github',fields:{token:'vault-fixture-secret-do-not-use',host:'github.com'}}));await clickApproval(page);await importer.done;assert.equal(importer.code,0,importer.err);assert(!importer.out.includes('vault-fixture'));console.log('PASS: encrypted credential import and owner-approved save');
  const fake=join(dir,'bin');await mkdir(fake);await writeFile(join(fake,'gh'),'#!/bin/sh\nif [ "$GH_TOKEN" = "vault-fixture-secret-do-not-use" ] && [ "$1" = "api" ] && [ "$2" = "/user?x=hello world" ]; then printf "wrapper-ok\\n"; exit 37; fi\nexit 99\n',{mode:0o700});
  const wrapped=cli(['--identity','Fixture GitHub','--reason','Read the requested test profile','gh','api','/user?x=hello world'],undefined,{...process.env,PATH:fake+':'+process.env.PATH,GH_TOKEN:'wrong-inherited-token'});await clickApproval(page);await wrapped.done;assert.equal(wrapped.code,37,wrapped.err);assert.equal(wrapped.out,'wrapper-ok\n');console.log('PASS: isolated child environment, exact argument pass-through, child exit code');
@@ -77,5 +83,6 @@ try{
  await page.locator('#login').click();await page.locator('#vault-view').waitFor({state:'visible'});await page.locator('[data-tab="identities"]').click();await page.locator('#add-identity').waitFor({state:'visible'});
  await mkdir('test-results',{recursive:true});await page.goto(origin+'/');await delay(1300);await page.screenshot({path:'test-results/vault-home-desktop.png',fullPage:true});for(const [name,width,height]of[['ipad',834,1194],['iphone',390,844]]){await page.setViewportSize({width,height});await page.screenshot({path:`test-results/vault-home-${name}.png`,fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'horizontal overflow '+name)}
  await page.goto(origin+'/app');await page.locator('#signout').click();await page.locator('#login').waitFor({state:'visible'});assert.equal(await page.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('grexie-vault/unlock/')).length),0);await page.reload();assert(await page.locator('#login').isVisible());assert.deepEqual(errors,[]);console.log('PASS: sign-out, mobile layout, no browser errors or plaintext upload');
+ }
 }catch(e){console.error(e);if(browser){for(const context of browser.contexts())for(const page of context.pages()){try{console.error('Visible status:',await page.locator('#toast').textContent());await page.screenshot({path:'test-results/vault-failure.png',fullPage:true})}catch{}}}process.exitCode=1;
 }finally{for(const p of children)if(p.exitCode===null)p.kill('SIGTERM');if(server&&server.exitCode===null){server.kill('SIGTERM');await new Promise(r=>server.on('exit',r))}if(restoreBrowser)await restoreBrowser.close();if(browser)await browser.close();await rm(dir,{recursive:true,force:true});}

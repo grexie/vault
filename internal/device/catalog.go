@@ -9,31 +9,38 @@ import (
 	"time"
 )
 
+type PublicCatalog struct {
+	OwnerID           string                       `json:"ownerId"`
+	Identities        []identity.Record            `json:"identities"`
+	WalletPermissions []vaultwire.WalletPermission `json:"walletPermissions,omitempty"`
+	UpdatedAt         string                       `json:"updatedAt"`
+}
+
 func (c *Client) Catalog(ctx context.Context) ([]identity.Record, error) {
+	catalog, e := c.CatalogData(ctx)
+	return catalog.Identities, e
+}
+func (c *Client) CatalogData(ctx context.Context) (PublicCatalog, error) {
 	var box vaultwire.Envelope
 	if e := c.Call(ctx, "/api/v1/device/catalog", struct{}{}, &box); e != nil {
-		return nil, e
+		return PublicCatalog{}, e
 	}
 	b, e := vaultwire.Open(c.Config.BoxPrivate, "catalog:"+c.Config.Device.ID, box)
 	if e != nil {
-		return nil, errors.New("public identity catalog could not be opened")
+		return PublicCatalog{}, errors.New("public identity catalog could not be opened")
 	}
 	defer clear(b)
 	var signed vaultwire.Signed
-	var catalog struct {
-		OwnerID    string            `json:"ownerId"`
-		Identities []identity.Record `json:"identities"`
-		UpdatedAt  string            `json:"updatedAt"`
-	}
+	var catalog PublicCatalog
 	if json.Unmarshal(b, &signed) != nil || vaultwire.Verify(c.Config.OwnerPublic, "catalog", signed, &catalog) != nil || catalog.OwnerID != c.Config.OwnerID {
-		return nil, errors.New("public identity catalog owner signature rejected")
+		return PublicCatalog{}, errors.New("public identity catalog owner signature rejected")
 	}
 	for _, r := range catalog.Identities {
 		if len(r.Secret) != 0 {
-			return nil, errors.New("catalog must not contain private identity data")
+			return PublicCatalog{}, errors.New("catalog must not contain private identity data")
 		}
 	}
-	return catalog.Identities, nil
+	return catalog, nil
 }
 func (c *Client) Authorization(p Pending, state vaultwire.RequestState) (vaultwire.Authorization, vaultwire.Receiver, error) {
 	var a vaultwire.Authorization

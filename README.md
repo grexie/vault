@@ -8,11 +8,12 @@ The project is MIT licensed. All application, server, CLI and browser code is he
 
 ## Build
 
-Go 1.26.8 is used for native binaries and browser WebAssembly. Node.js is needed only for browser checks. macOS and Linux are supported; Windows can run the CLI inside WSL2. Native macOS Keychain integration requires cgo and the Apple Security framework.
+Go 1.26.8 is used for native binaries and browser WebAssembly. Node.js 22 or newer builds the TypeScript Chrome extension and runs browser checks. macOS and Linux are supported; Windows can run the CLI inside WSL2. Native macOS Keychain integration requires cgo and the Apple Security framework.
 
 ```sh
 git clone https://github.com/grexie/vault.git
 cd vault
+npm ci
 make build
 install -m 0755 bin/vault "$HOME/.local/bin/vault"
 ```
@@ -87,6 +88,12 @@ vault --identity wallet --reason 'Sign the reviewed contract call' foundry \
 The adapter exposes only the selected address. `--broadcast` explicitly lets the **caller-side adapter** submit transactions for commands such as `cast send --unlocked`; the hosted service and signing daemon never broadcast. Test against Anvil first. Only replay-protected legacy, EIP-2930 and EIP-1559 Ethereum transactions are supported; Bitcoin supports P2PKH, P2WPKH and key-path P2TR with committed outputs.
 
 Threshold CMP/FROST primitives and tests are present, but shared-owner enrollment, recovery and signing are not released in the public app yet. Do not place funds in an experimental shared identity. Imported keys remain single-owner. Strict n-of-n requires every share: if an owner dies without a recoverable share and owner authentication material, access is lost. A policy change cannot recover missing cryptographic material.
+
+## Web3 sites and Hyperliquid
+
+Install the keyless Chrome wallet with `vault browser-wallet install`. Chrome starts its native bridge automatically; there is no localhost port, extension password or second Vault account. Connect a named Ethereum identity in the existing Vault app, then approve each message or transaction there. EIP-6963 discovery coexists with other wallets. Arbitrary EVM networks, EIP-712 v1/v3/v4, account permissions and read-only RPC are supported. `eth_sendTransaction` explicitly approves **sign and submit**; `eth_signTransaction` returns bytes without submitting. See the [installation, compatibility and test guide](docs/browser-wallet.md).
+
+`vault --identity pixi-timoshisa hyperliquid balance`, `positions` and `orders` read public account state without approval. `hyperliquid sign --network mainnet` signs one exact action with fresh approval and returns the exchange envelope; the caller decides whether to submit. See [Hyperliquid commands](docs/hyperliquid.md).
 
 ## Self-host and inspect
 
