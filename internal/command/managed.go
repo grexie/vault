@@ -314,35 +314,58 @@ func serveManagedBridge(ctx context.Context, s savedSession) error {
 			return e
 		}
 		go func() {
-			defer conn.Close()
-			go func() { <-scope.Done(); conn.Close() }()
-			for {
-				conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-				header := make([]byte, 4)
-				if _, e := io.ReadFull(conn, header); e != nil {
-					return
-				}
-				n := binary.BigEndian.Uint32(header)
-				if n < 1 || n > 262140 {
-					return
-				}
-				message := make([]byte, 4+int(n))
-				copy(message, header)
-				if _, e := io.ReadFull(conn, message[4:]); e != nil {
-					return
-				}
-				reply, e := c.RPC(scope, s.Endpoint, s.Pending, state, "ssh", message)
-				if e != nil {
-					return
-				}
-				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if _, e = conn.Write(reply); e != nil {
-					return
-				}
-			}
+			serveManagedSSHConn(scope, conn, func(message []byte) ([]byte, error) {
+				return c.RPC(scope, s.Endpoint, s.Pending, state, "ssh", message)
+			})
 		}()
 	}
 }
+
+func serveManagedSSHConn(ctx context.Context, conn net.Conn, rpc func([]byte) ([]byte, error)) {
+	defer conn.Close()
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-ctx.Done():
+			conn.Close()
+		case <-finished:
+		}
+	}()
+	for {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		header := make([]byte, 4)
+		if _, e := io.ReadFull(conn, header); e != nil {
+			return
+		}
+		n := binary.BigEndian.Uint32(header)
+		if n < 1 || n > 262140 {
+			return
+		}
+		message := make([]byte, 4+int(n))
+		copy(message, header)
+		if _, e := io.ReadFull(conn, message[4:]); e != nil {
+			return
+		}
+		// OpenSSH probes session-bind@openssh.com before listing keys. Refuse
+		// unsupported extensions and all mutations with SSH_AGENT_FAILURE,
+		// preserving the connection so the client can list/sign afterwards.
+		// Only list (11) and sign (13) ever reach the signing device.
+		reply := []byte{0, 0, 0, 1, 5}
+		if message[4] == 11 || message[4] == 13 {
+			var e error
+			reply, e = rpc(message)
+			if e != nil {
+				return
+			}
+		}
+		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if _, e := conn.Write(reply); e != nil {
+			return
+		}
+	}
+}
+
 func agentVault(ctx context.Context, o vaultOptions, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: vault agent serve|configure|info")

@@ -42,6 +42,8 @@ For the subsequent management update, the main agent reported browser checks pas
 
 The complete management browser run also rechecked restart/session persistence, encrypted backup restore, transaction signing, provider access, autofill, and secret cleanup. A functional restore edge identified during review was fixed by fitting conflict suffixes within the 80-byte UTF-8 identity-name limit and validating renamed records; JavaScript tests cover ASCII and multibyte names. Notification-worker tests verify that clicks target the app rather than a marketing/documentation window.
 
+Live OpenSSH verification exposed a client bridge compatibility issue: an unsupported `session-bind@openssh.com` probe closed the connection before key listing. The bridge now returns `SSH_AGENT_FAILURE` for unsupported extensions and mutations while keeping the connection usable. Only list/sign operations reach the unchanged signing daemon and its live approval checks. The independent reviewer found no new security blocker and reran the bridge regression tests under the race detector; the main agent also passed the full Go race suite and focused static checks. OpenSSH destination constraints are unsupported, and the same-user local socket does not impose a connection-count limit.
+
 ## Dependency scanner results and evidence
 
 The official `govulncheck` v1.8.0 scan reported a Taurus entry as reachable and an OpenPGP entry at module level. The scan must not be represented as clean. Both entries were investigated rather than silently suppressed.
