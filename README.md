@@ -68,6 +68,8 @@ vault --identity example run example-bearer -- status
 
 Import is explicit and approval-gated. Existing local credentials remain in place. `import PROVIDER --stdin` accepts credential JSON without putting secrets in command arguments. See [provider profiles](docs/providers.md) for custom CLI environment mappings and bounded HTTPS basic, bearer, header and query authentication.
 
+For an existing Ethereum or Base wallet, use `vault --reason 'Import my existing deployer' import ethereum --name deployer --stdin --address EXPECTED_PUBLIC_ADDRESS` and pipe the hex private key into stdin from its trusted source. The optional `--address` check rejects a different key before upload. Vault derives the public address locally and encrypts the key to the paired owner; approve the identity in the app to save it. Never put the private key in command arguments, shell history or logs. An Ethereum identity works across EVM chains; each signing request specifies its chain ID separately.
+
 Website passwords can be imported one exact HTTPS origin/account at a time from Chrome or Safari through normal macOS authorization, or from a user-exported CSV. `vault keychain serve` caches Chrome's authorized decryption key only in service memory. Apple may still require additional prompts; modern Apple Passwords may require an official export. Vault does not bypass these controls. [Autofill and payment cards](docs/autofill.md) documents the CLI and local-only CVV support.
 
 ## Transactions

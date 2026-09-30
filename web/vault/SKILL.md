@@ -74,6 +74,8 @@ vault revoke --session incident-review
 
 `vault identity list` and `vault --identity NAME identity lookup --type ssh` read a signed public catalog without approval. `vault --identity NAME --reason TEXT identity create --type ssh|ethereum|bitcoin` asks the user to approve browser key generation. Use explicit `--network` for Bitcoin.
 
+When the user requests import of an existing Ethereum/Base key, use `vault --reason TEXT import ethereum --name NAME --stdin --address EXPECTED_PUBLIC_ADDRESS`. Pipe the hex private key from its authorized source directly to stdin; never expose it in command arguments, logs or temporary plaintext files. The optional address check rejects a different key before the encrypted approval request. The user reviews and saves it in the app. Verify the saved address with `identity lookup --type ethereum`; preserve the original credential unless removal is separately authorized. The same identity can sign for different EVM chains, with an explicit chain ID per transaction. An import or test request does not authorize broadcasting or moving funds.
+
 ```sh
 vault --identity work encrypt --output document.age document.txt
 vault --identity work --reason 'Read the document requested by the user' decrypt --output document.txt document.age

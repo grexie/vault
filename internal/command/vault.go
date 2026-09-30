@@ -323,6 +323,9 @@ func importVault(ctx context.Context, o vaultOptions, args []string) error {
 	if args[0] == "chrome" || args[0] == "safari" {
 		return importBrowserVault(ctx, o, args[0], args[1:])
 	}
+	if args[0] == "ethereum" {
+		return importEthereumVault(ctx, o, args[1:])
+	}
 	name := provider.Alias(args[0])
 	f := flags("import")
 	identityName := f.String("name", o.Identity, "new identity name (required)")
@@ -370,7 +373,16 @@ func importVault(ctx context.Context, o vaultOptions, args []string) error {
 		return e
 	}
 	defer clear(record.Secret)
-	plain, _ := json.Marshal(record)
+	return approveIdentityImport(ctx, client, o, record)
+}
+
+// approveIdentityImport sends only an envelope encrypted to the paired owner.
+// The browser validates and saves the identity after a fresh passkey approval.
+func approveIdentityImport(ctx context.Context, client *device.Client, o vaultOptions, record identity.Record) error {
+	plain, e := json.Marshal(record)
+	if e != nil {
+		return errors.New("could not encode identity")
+	}
 	defer clear(plain)
 	// The owner encryption key is pinned during out-of-band device pairing.
 	box, e := vaultwire.Seal(client.Config.OwnerBoxPublic, "import:"+client.Config.Device.ID, plain)
@@ -378,18 +390,27 @@ func importVault(ctx context.Context, o vaultOptions, args []string) error {
 		return e
 	}
 	payload, _ := json.Marshal(box)
-	q := requestSpec(o, "import", *identityName, record.Type, payload)
-	q.Network = name
+	q := requestSpec(o, "import", record.Name, record.Type, payload)
+	q.Network = record.Network
 	pending, state, e := waitVault(ctx, client, o, q)
 	if e != nil {
 		return e
 	}
 	defer client.CloseRequest(pending.Request.ID)
-	_, e = client.Response(pending, state)
+	result, e := client.Response(pending, state)
 	if e != nil {
 		return e
 	}
-	fmt.Fprintln(os.Stderr, "Credential import approved and saved in the encrypted vault.")
+	defer clear(result)
+	var saved identity.Record
+	if json.Unmarshal(result, &saved) != nil {
+		return errors.New("invalid identity import confirmation")
+	}
+	defer clear(saved.Secret)
+	if saved.ID != record.ID || saved.Name != record.Name || saved.Type != record.Type || saved.Network != record.Network || saved.Address != record.Address || saved.PublicKey != record.PublicKey || len(saved.Secret) != 0 || saved.Threshold || len(saved.Owners) != 0 {
+		return errors.New("import confirmation does not match the requested public identity")
+	}
+	fmt.Fprintln(os.Stderr, "Identity import approved and saved in the encrypted vault.")
 	return nil
 }
 func identityVault(ctx context.Context, o vaultOptions, args []string) error {
